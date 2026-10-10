@@ -1,0 +1,15 @@
+# Local Postgres 18 for development and integration tests (Neon runs Postgres 18 when deployed).
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: commoncart
+      POSTGRES_PASSWORD: commoncart
+      POSTGRES_DB: commoncart
+    ports:
+      - "54329:5432"
+    volumes:
+      - ./scripts/create-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql:ro
+      - commoncart-pg:/var/lib/postgresql
+volumes:
+  commoncart-pg:

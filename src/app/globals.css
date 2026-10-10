@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #faf6ef;
+  --color-surface: #ffffff;
+  --color-sunken: #f3ede3;
+  --color-ink: #2a251f;
+  --color-muted: #6b6257;
+  --color-line: #e6ddcf;
+  --color-savings: #1d6b45;
+  --color-savings-strong: #155236;
+  --color-savings-soft: #e3f2e9;
+  --color-warn: #9a4b0a;
+  --color-warn-soft: #fdf0d8;
+  --color-danger: #a8261b;
+  --color-danger-soft: #fbe7e4;
+  --color-info: #1e4f9c;
+  --color-info-soft: #e4edfb;
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-savings);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion preference must override component transitions */
+    transition-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion preference must override component animations */
+    animation-duration: 0.01ms !important;
+  }
+}

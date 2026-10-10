@@ -1,6 +1,6 @@
 # CommonCart conventions
 
-Status: rules for the **planned** application. The current repository contains documentation, not an installed application stack.
+Status: rules for the application, which is now scaffolded. Commands below are implemented.
 
 ## Language, modules and boundaries
 
@@ -43,7 +43,7 @@ The optimizer uses largest-remainder allocation. Savings equal a participant's s
 ## HTTP and authorization
 
 - Browser requests use JSON and validated contracts. Return successful resources as `{ data: ... }` and failures as `{ error: { code, message, requestId, fields? } }`.
-- Use 400 for malformed/invalid input, 401 for a missing session, 404 for missing or out-of-session resources, 409 for stale versions or incompatible state, and 503 for a retryable upstream dependency failure.
+- Use 400 for malformed/invalid input, 401 for a missing session, 403 for a disallowed request origin, a non-organizer action or disabled demo controls, 404 for missing or out-of-session resources, 409 for stale versions or incompatible state, and 503 for a retryable upstream dependency failure.
 - Financial operations may return 202 with the operation resource when pending or unknown. An unknown outcome is not a definitive failure that invites a fresh payment.
 - Resolve the session from an opaque HTTP-only cookie, with `Secure` in deployed HTTPS environments and `SameSite=Lax`. Mutations check the request origin as well as session ownership.
 - Scope all reads and writes by session; never authorize using only a client-supplied shopper, group, account or operation ID.
@@ -89,7 +89,7 @@ Mode is fixed for a session. Sponsor errors must not produce rehearsal results u
 
 ## Tests and verification commands
 
-These are the command contracts to implement during scaffolding; they do not exist yet.
+These command contracts are implemented. `npm run test:e2e` builds the app and serves it on port 3100 against `TEST_DATABASE_URL`. `npm run snowflake:setup` (creates analytical tables) also requires `RUN_LIVE_SPONSOR_CHECKS=true`.
 
 | Command | Purpose |
 | --- | --- |

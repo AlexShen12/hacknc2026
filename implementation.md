@@ -1,6 +1,6 @@
 # CommonCart implementation guide
 
-Status: **planned; all application milestones are pending**. This guide specifies the later application build. The documentation pass does not provision services, scaffold code or verify authenticated sponsor calls.
+Status: **milestones 1–5 implemented and verified in rehearsal mode locally; sponsor verification, deployment and the scraping stretch are pending.** See [Implementation status](#implementation-status).
 
 Read [atlas.md](atlas.md) for the system map, [conventions.md](conventions.md) for implementation rules and [techContext.md](techContext.md) for exact pins and external API evidence.
 
@@ -24,7 +24,7 @@ The hour ranges allocate a 24-hour effort budget; they are planning targets, not
 | 5. Presentation | Hours 18–21 | Add grounded Cortex explanations, source labels, pickup summary, operator controls and responsive/accessibility polish. Sponsor mode visibly uses real Snowflake queries and explanations. |
 | 6. Verification | Hours 21–24 | Run the full check suite, verify deployed sponsor behavior and rehearse the demo. Record actual limitations and provider status. Attempt scraping only if the complete flow and checks already pass, with a 45-minute limit. |
 
-Mark a milestone complete only with its evidence. Live API checks that cannot be performed remain pending, even when their rehearsal adapters work. No application milestone is complete at document creation.
+Mark a milestone complete only with its evidence. Live API checks that cannot be performed remain pending, even when their rehearsal adapters work. Current evidence is recorded under [Implementation status](#implementation-status).
 
 ## Core contracts
 
@@ -37,7 +37,7 @@ Define these as domain types with matching Zod validation at boundaries. Persist
 | `Offer` | Retailer/store, SKU, product family, normalized unit, package quantity, item/tax/fee/total cents, supported comparison baselines, membership requirement, pickup location, availability, version, source kind/URL/retrieval time/expiration |
 | `Need` | Session/shopper, accepted SKU IDs, exact quantity, maximum contribution cents, pickup zone/window, status, creation time and revision |
 | `Proposal` | Session, offer snapshot, group status, revision, initiating need, organizer, collection-account reference, analytical snapshot and timestamps |
-| `Allocation` | Proposal, need/shopper, quantity, contribution/baseline/savings cents, consented terms, contribution/return references, active/departing/replaced/picked-up state |
+| `Allocation` | Proposal, need/shopper, quantity, contribution/baseline/savings cents, consented terms, contribution/return references, display position, `replacesAllocationId` link, and `active`/`departing`/`departed`/`picked_up` state |
 | `BankOperation` | Session/group/allocation as applicable, contribution/return/purchase kind, logical operation key, amount, account references, status, attempt history, provider IDs, correlation value and error metadata |
 | `WorkflowEvent` | Session/group, monotonic group sequence, actor, event type, timestamp and bounded structured payload |
 
@@ -168,7 +168,7 @@ Extract only a clearly visible product identifier/name, package quantity/unit, p
 
 ## Verification and delivery
 
-Use the command definitions in [conventions.md](conventions.md). No commands are implemented yet.
+Use the command definitions in [conventions.md](conventions.md).
 
 | Test level | Required cases |
 | --- | --- |
@@ -186,3 +186,30 @@ Delivery evidence should include test/build results, the hosted URL, the scenari
 ## Documentation acceptance
 
 The documentation set is ready when scope, type names, statuses, provider modes, fixture arithmetic, commands and version pins agree across all guides; local links resolve; official reference links are checked or their access limitation is recorded; and planned capabilities are not described as completed integrations.
+
+## Implementation status
+
+Recorded October 10, 2026, local machine (macOS, Node 25.8.1, Postgres 18 via Docker). Rehearsal mode only.
+
+| Milestone | Status | Evidence |
+| --- | --- | --- |
+| 0. External contracts | **Pending** | No sponsor credentials available. Adapters follow public docs; `npm run verify:sponsors` is written but has not run. |
+| 1. Foundation | **Done locally; not deployed** | Exact pins installed with lockfile; reviewed migration `drizzle/0000_initial.sql`; isolated cookie sessions; lint, format, typecheck and build pass. Vercel/Neon deployment not performed. |
+| 2. Shopping and matching | **Done (rehearsal)** | Domain tests cover every listed matching case; the fixture scenario selects Alex, Jordan, Sam and Riley and excludes Taylor by budget. |
+| 3. Funding | **Done (rehearsal)** | Integration tests: duplicate concurrent contributions create one operation; stale versions return `STALE_PROPOSAL`; purchase/withdraw race yields exactly one winner. |
+| 4. Funded dropout | **Done (rehearsal)** | Integration and Playwright journeys: Jordan's $15 is returned, Casey fills the fixed slot, $60 purchase, four pickups, $28 total savings. Cancellation, no replacement, failed/unknown return and offer change are tested. |
+| 5. Presentation | **Done (rehearsal); Cortex pending** | Template explanation validated against evidence; source/mode labels, operator panel, pickup flow, desktop and mobile layouts. Live Cortex output not yet observed. |
+| 6. Verification | **Partial** | Local suite: 52 unit, 14 integration, 4 Playwright tests (desktop and mobile) pass. Live sponsor checks, deployed runtime and demo rehearsal on a hosted URL are pending. Scraping stretch not attempted. |
+
+### Decisions made during implementation
+
+- Open demand uses need status `forming`; other need statuses are `reserved`, `withdrawn` and `fulfilled`. A cancelled group returns its reserved needs to `forming`.
+- Allocation state uses `departed` rather than `replaced`. A replacement allocation links to the slot it fills through `replacesAllocationId`; a vacancy is a departed allocation that no later allocation replaces.
+- Offers are copied into each session as versioned snapshots, so the operator can expire an offer without affecting other sessions.
+- The group's collection account is created when the group first enters `funding`, not at proposal time. That avoids sandbox accounts for proposals nobody confirms.
+- Only contributions require `funding` status. Withdrawals made before purchase follow the funding map; withdrawing while a proposal is still `awaiting_confirmation` cancels that proposal and releases its reservations.
+- Rehearsal banking can inject one fault for the next write: stays pending (settles when reconciled), lost response (executed, recoverable by correlation lookup), or rejection. The rehearsal ledger's correlation lookup is authoritative, so a lookup that finds nothing marks an operation as never executed. The Nessie adapter reports `correlationLookup: false`, so its lost responses stay `unknown` for the operator.
+- A dispatch left in `dispatching` for more than 30 seconds is treated as unknown when reconciled.
+- `GET /api/demo/operator` was added as a read-only operator view (groups, balances, outbox counts, event log).
+- Explicit retries: a failed contribution is retried through `contribute`; a failed return through the `retry_operation` demo action; a failed purchase through `purchase`. Reconciliation never resubmits.
+- Bills are not read; affordability uses the contribution limit and balance minus the persona's buffer.

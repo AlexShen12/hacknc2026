@@ -1,6 +1,6 @@
 # CommonCart atlas
 
-Status: **planned architecture; documentation only**. No application, database, deployment or sponsor connection exists in this repository yet.
+Status: **implemented locally in rehearsal mode**. The application, migrations and provider adapters exist; no deployment exists and no authenticated sponsor connection has been verified. See [implementation.md](implementation.md#implementation-status).
 
 ## Reading map
 
@@ -91,7 +91,7 @@ tests/                    domain, database integration and browser scenarios
 public/                   local product illustrations and static assets
 ```
 
-These directories are planned, not an inventory of implemented code. Use one application and one package manifest. Vite supports Vitest only; Next.js handles the application build. Database schema evolves through reviewed migrations rather than runtime table creation.
+These directories now exist. Additional implementation files: `src/lib/` holds client-safe formatting, view contracts and the API client; `src/server/http.ts` holds the route envelope/origin/cookie helpers; `docker-compose.yml` provides local Postgres 18. Use one application and one package manifest. Vite supports Vitest only; Next.js handles the application build. Database schema evolves through reviewed migrations rather than runtime table creation.
 
 ## Funding map
 

@@ -1,6 +1,6 @@
 # CommonCart technical context
 
-Status: **planned dependency and integration baseline; application not scaffolded**. Versions below were checked against official npm/Node release metadata during planning on **October 10, 2026**. No dependency installation, build, authenticated sponsor call or deployment has been performed for this documentation pass.
+Status: **dependencies installed and building; sponsor integrations unverified**. Versions below were checked against official npm/Node release metadata during planning on **October 10, 2026** and installed exactly (see the evidence register). No authenticated sponsor call or deployment has been performed.
 
 See [implementation.md](implementation.md) for acceptance gates and [conventions.md](conventions.md) for dependency and provider rules.
 
@@ -132,11 +132,11 @@ Actual account creation, PAT scope/network policy, warehouse access, table privi
 
 | Check | Current evidence | Required completion evidence |
 | --- | --- | --- |
-| Package release metadata | Exact versions and engine/peer metadata checked during planning, October 10, 2026 | Successful exact-version installation, lockfile, typecheck and build |
-| Hosting compatibility | Vercel docs list Node 24.x; Neon documents Postgres 18 support | Actual deployed runtime/database version and working application connection |
-| Nessie capabilities | Public documentation only | Verified host, paths, amount conversion, IDs/statuses, settlement behavior and sandbox operation references |
-| Snowflake SQL | Public API documentation only | Successful authenticated query, synchronized demo rows and recorded query/statement reference |
-| Cortex | Public API/model documentation only | Successful response through the configured Snowflake account and default role |
+| Package release metadata | **Observed Oct 10, 2026:** exact-version install with committed lockfile; `npm ci`, typecheck (`next typegen` + TypeScript 7.0.2 `tsc`), lint, tests and `next build` (Next 16.4.0 with Turbopack, which ran its TypeScript step on TS 7.0.2) all pass. Local runtime was Node 25.8.1 (`EBADENGINE` warning against `24.x`); Node 24.21.0 compatibility not yet re-run | Re-run the suite on Node 24.21.0 |
+| Hosting compatibility | Vercel docs list Node 24.x; Neon documents Postgres 18 support. Local Docker `postgres:18` applies the migration and passes integration tests | Actual deployed runtime/database version and working application connection |
+| Nessie capabilities | Public documentation only. Adapter `src/server/providers/banking/nessie.ts` **assumes** decimal-dollar amounts, the paths in `NESSIE_PATHS` (including singular `GET /purchase/{id}`), status names `pending`/`executed`/`completed`/`cancelled`, and no correlation lookup. Unit-tested only with fake responses | Verified host, paths, amount conversion, IDs/statuses, settlement behavior and sandbox operation references |
+| Snowflake SQL | Public API documentation only. Adapter uses `POST /api/v2/statements` with PAT headers, positional `TEXT`/`FIXED` bindings, `requestId`/`retry=true`, async handle polling and partitions; schema in `snowflake/schema.sql`. Unit-tested with fake responses | Successful authenticated query, synchronized demo rows and recorded query/statement reference |
+| Cortex | Public API/model documentation only. Adapter posts non-streaming chat completions and the domain validator rejects unsupported amounts or banking claims | Successful response through the configured Snowflake account and default role |
 | Retail scraping | No scraping attempted | Inspectable source observation and validated imported offer, or keep fixtures |
 | Club membership | No verification integration established | Remains explicitly simulated for MVP |
 

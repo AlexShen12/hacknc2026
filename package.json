@@ -1,0 +1,55 @@
+{
+  "name": "commoncart",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.19.0",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "playwright test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "demo:seed": "tsx --env-file-if-exists=.env scripts/demo-seed.ts",
+    "snowflake:setup": "tsx --env-file-if-exists=.env scripts/snowflake-setup.ts",
+    "verify:sponsors": "tsx --env-file-if-exists=.env scripts/verify-sponsors.ts"
+  },
+  "dependencies": {
+    "clsx": "2.1.1",
+    "drizzle-orm": "0.45.4",
+    "lucide-react": "1.55.0",
+    "next": "16.4.0",
+    "pg": "8.23.1",
+    "radix-ui": "1.7.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwind-merge": "3.7.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@playwright/test": "1.64.0",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "drizzle-kit": "0.31.11",
+    "postcss": "8.5.29",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  }
+}

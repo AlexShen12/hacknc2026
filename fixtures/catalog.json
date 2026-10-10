@@ -1,0 +1,218 @@
+{
+  "fixtureVersion": "catalog-2026-10-10.1",
+  "notice": "Fictional demo offers labeled with real retailer names. Prices, inventory and membership rules are illustrative, not current retail data.",
+  "pickupZone": {
+    "key": "chapel-hill-central",
+    "label": "Franklin St. pickup point, Chapel Hill"
+  },
+  "pickupWindows": [
+    { "key": "window-a", "startOffsetHours": 22, "durationHours": 2 },
+    { "key": "window-b", "startOffsetHours": 46, "durationHours": 2 }
+  ],
+  "offers": [
+    {
+      "key": "wm-paper-towels-24",
+      "retailer": "walmart",
+      "storeName": "Walmart (fictional demo store)",
+      "sku": "DEMO-WM-PT-24",
+      "productFamily": "paper-towels",
+      "productName": "Everyday Paper Towels",
+      "unit": "rolls",
+      "packageQuantity": 24,
+      "itemCents": 6000,
+      "taxCents": 0,
+      "feeCents": 0,
+      "baselines": [
+        { "quantity": 4, "baselineCents": 1500 },
+        { "quantity": 6, "baselineCents": 2200 },
+        { "quantity": 8, "baselineCents": 2900 },
+        { "quantity": 12, "baselineCents": 4300 }
+      ],
+      "membershipRequired": null,
+      "pickupWindows": ["window-a", "window-b"],
+      "available": true,
+      "expiresInHours": 72,
+      "image": "/products/paper-towels.svg"
+    },
+    {
+      "key": "co-paper-towels-30",
+      "retailer": "costco",
+      "storeName": "Costco (fictional demo warehouse)",
+      "sku": "DEMO-CO-PT-30",
+      "productFamily": "paper-towels",
+      "productName": "Club Pack Paper Towels",
+      "unit": "rolls",
+      "packageQuantity": 30,
+      "itemCents": 6900,
+      "taxCents": 0,
+      "feeCents": 0,
+      "baselines": [
+        { "quantity": 5, "baselineCents": 1800 },
+        { "quantity": 10, "baselineCents": 3500 },
+        { "quantity": 15, "baselineCents": 5200 }
+      ],
+      "membershipRequired": "costco",
+      "pickupWindows": ["window-b"],
+      "available": true,
+      "expiresInHours": 72,
+      "image": "/products/paper-towels.svg"
+    },
+    {
+      "key": "sc-paper-towels-15",
+      "retailer": "sams_club",
+      "storeName": "Sam's Club (fictional demo club)",
+      "sku": "DEMO-SC-PT-15",
+      "productFamily": "paper-towels",
+      "productName": "Member Pack Paper Towels",
+      "unit": "rolls",
+      "packageQuantity": 15,
+      "itemCents": 4200,
+      "taxCents": 0,
+      "feeCents": 0,
+      "baselines": [
+        { "quantity": 3, "baselineCents": 1100 },
+        { "quantity": 5, "baselineCents": 1800 }
+      ],
+      "membershipRequired": "sams_club",
+      "pickupWindows": ["window-a"],
+      "available": true,
+      "expiresInHours": 72,
+      "image": "/products/paper-towels.svg"
+    },
+    {
+      "key": "wm-snack-bars-48",
+      "retailer": "walmart",
+      "storeName": "Walmart (fictional demo store)",
+      "sku": "DEMO-WM-SB-48",
+      "productFamily": "snack-bars",
+      "productName": "Oat Snack Bars",
+      "unit": "bars",
+      "packageQuantity": 48,
+      "itemCents": 2400,
+      "taxCents": 0,
+      "feeCents": 0,
+      "baselines": [
+        { "quantity": 12, "baselineCents": 900 },
+        { "quantity": 16, "baselineCents": 1150 },
+        { "quantity": 24, "baselineCents": 1700 }
+      ],
+      "membershipRequired": null,
+      "pickupWindows": ["window-a", "window-b"],
+      "available": true,
+      "expiresInHours": 72,
+      "image": "/products/snack-bars.svg"
+    },
+    {
+      "key": "co-snack-bars-60",
+      "retailer": "costco",
+      "storeName": "Costco (fictional demo warehouse)",
+      "sku": "DEMO-CO-SB-60",
+      "productFamily": "snack-bars",
+      "productName": "Variety Snack Bars",
+      "unit": "bars",
+      "packageQuantity": 60,
+      "itemCents": 2700,
+      "taxCents": 0,
+      "feeCents": 0,
+      "baselines": [
+        { "quantity": 12, "baselineCents": 850 },
+        { "quantity": 20, "baselineCents": 1350 },
+        { "quantity": 30, "baselineCents": 1950 }
+      ],
+      "membershipRequired": "costco",
+      "pickupWindows": ["window-b"],
+      "available": true,
+      "expiresInHours": 72,
+      "image": "/products/snack-bars.svg"
+    },
+    {
+      "key": "sc-snack-bars-40",
+      "retailer": "sams_club",
+      "storeName": "Sam's Club (fictional demo club)",
+      "sku": "DEMO-SC-SB-40",
+      "productFamily": "snack-bars",
+      "productName": "Protein Snack Bars",
+      "unit": "bars",
+      "packageQuantity": 40,
+      "itemCents": 3200,
+      "taxCents": 0,
+      "feeCents": 0,
+      "baselines": [
+        { "quantity": 10, "baselineCents": 1100 },
+        { "quantity": 20, "baselineCents": 2100 }
+      ],
+      "membershipRequired": "sams_club",
+      "pickupWindows": ["window-a"],
+      "available": true,
+      "expiresInHours": 72,
+      "image": "/products/snack-bars.svg"
+    },
+    {
+      "key": "wm-trash-bags-90",
+      "retailer": "walmart",
+      "storeName": "Walmart (fictional demo store)",
+      "sku": "DEMO-WM-TB-90",
+      "productFamily": "trash-bags",
+      "productName": "Tall Kitchen Trash Bags",
+      "unit": "bags",
+      "packageQuantity": 90,
+      "itemCents": 2250,
+      "taxCents": 0,
+      "feeCents": 0,
+      "baselines": [
+        { "quantity": 30, "baselineCents": 1050 },
+        { "quantity": 45, "baselineCents": 1500 }
+      ],
+      "membershipRequired": null,
+      "pickupWindows": ["window-a", "window-b"],
+      "available": true,
+      "expiresInHours": 72,
+      "image": "/products/trash-bags.svg"
+    },
+    {
+      "key": "co-trash-bags-200",
+      "retailer": "costco",
+      "storeName": "Costco (fictional demo warehouse)",
+      "sku": "DEMO-CO-TB-200",
+      "productFamily": "trash-bags",
+      "productName": "Drawstring Trash Bags",
+      "unit": "bags",
+      "packageQuantity": 200,
+      "itemCents": 3600,
+      "taxCents": 0,
+      "feeCents": 0,
+      "baselines": [
+        { "quantity": 50, "baselineCents": 1300 },
+        { "quantity": 100, "baselineCents": 2400 }
+      ],
+      "membershipRequired": "costco",
+      "pickupWindows": ["window-b"],
+      "available": true,
+      "expiresInHours": 72,
+      "image": "/products/trash-bags.svg"
+    },
+    {
+      "key": "sc-trash-bags-120",
+      "retailer": "sams_club",
+      "storeName": "Sam's Club (fictional demo club)",
+      "sku": "DEMO-SC-TB-120",
+      "productFamily": "trash-bags",
+      "productName": "Heavy Duty Trash Bags",
+      "unit": "bags",
+      "packageQuantity": 120,
+      "itemCents": 3000,
+      "taxCents": 0,
+      "feeCents": 0,
+      "baselines": [
+        { "quantity": 30, "baselineCents": 1100 },
+        { "quantity": 40, "baselineCents": 1400 },
+        { "quantity": 60, "baselineCents": 2000 }
+      ],
+      "membershipRequired": "sams_club",
+      "pickupWindows": ["window-a"],
+      "available": true,
+      "expiresInHours": 72,
+      "image": "/products/trash-bags.svg"
+    }
+  ]
+}

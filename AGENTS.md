@@ -4,7 +4,8 @@
 - Read [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the product and agreed MVP.
 - Read [atlas.md](atlas.md) for boundaries and data flow, then [implementation.md](implementation.md) for the next milestone.
 - Follow [conventions.md](conventions.md); use [techContext.md](techContext.md) for dependency pins, configuration and API references.
-- Current state: documentation only. Application directories, commands and integrations described in these guides are planned until implemented and verified.
+- Current state: the application is scaffolded and the full journey works in **rehearsal** mode locally (see the status section in [implementation.md](implementation.md)). Sponsor adapters (Nessie, Snowflake SQL, Cortex) are implemented against public documentation but **unverified**; nothing is deployed to Vercel/Neon yet.
+- Local database: `docker compose up -d` starts Postgres 18 with `commoncart` and `commoncart_test` databases; copy `.env.example` to `.env`, then `npm run db:migrate`.
 
 ## Scope and boundaries
 - Build the agreed 24-hour, hosted, needs-first demo with seeded personas and a friendly shopping-club UI.
@@ -36,3 +37,13 @@
 - Record observed API behavior separately from documented capabilities and unverified assumptions.
 - Pin direct dependencies exactly and commit the lockfile during scaffolding; do not copy `latest` or prerelease install commands from vendor docs.
 - Keep milestone status truthful. A planned endpoint, successful mock test or cached fixture is not a verified live integration.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

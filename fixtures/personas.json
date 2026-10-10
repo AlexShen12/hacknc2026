@@ -1,0 +1,102 @@
+{
+  "scenarioVersion": "featured-dropout-v1",
+  "notice": "Seeded demo shoppers. Club memberships are simulated flags, not verified memberships.",
+  "defaultPersona": "alex",
+  "personas": [
+    {
+      "key": "alex",
+      "displayName": "Alex",
+      "tagline": "Grad student, small apartment",
+      "openingBalanceCents": 10000,
+      "bufferCents": 2000,
+      "memberships": [],
+      "draftNeed": {
+        "offerKey": "wm-paper-towels-24",
+        "quantity": 6,
+        "maxContributionCents": 2000,
+        "pickupWindow": "window-a"
+      },
+      "seededNeed": null
+    },
+    {
+      "key": "jordan",
+      "displayName": "Jordan",
+      "tagline": "Shares a duplex with two roommates",
+      "openingBalanceCents": 10000,
+      "bufferCents": 2000,
+      "memberships": [],
+      "draftNeed": null,
+      "seededNeed": {
+        "offerKey": "wm-paper-towels-24",
+        "quantity": 6,
+        "maxContributionCents": 2000,
+        "pickupWindow": "window-a",
+        "minutesBeforeSession": 50
+      }
+    },
+    {
+      "key": "sam",
+      "displayName": "Sam",
+      "tagline": "Bikes to campus, no car",
+      "openingBalanceCents": 10000,
+      "bufferCents": 2000,
+      "memberships": ["costco"],
+      "draftNeed": null,
+      "seededNeed": {
+        "offerKey": "wm-paper-towels-24",
+        "quantity": 6,
+        "maxContributionCents": 2000,
+        "pickupWindow": "window-a",
+        "minutesBeforeSession": 40
+      }
+    },
+    {
+      "key": "riley",
+      "displayName": "Riley",
+      "tagline": "Works weekends, plans ahead",
+      "openingBalanceCents": 10000,
+      "bufferCents": 2000,
+      "memberships": ["sams_club"],
+      "draftNeed": null,
+      "seededNeed": {
+        "offerKey": "wm-paper-towels-24",
+        "quantity": 6,
+        "maxContributionCents": 2000,
+        "pickupWindow": "window-a",
+        "minutesBeforeSession": 30
+      }
+    },
+    {
+      "key": "taylor",
+      "displayName": "Taylor",
+      "tagline": "Tight budget this month",
+      "openingBalanceCents": 10000,
+      "bufferCents": 2000,
+      "memberships": [],
+      "draftNeed": null,
+      "seededNeed": {
+        "offerKey": "wm-paper-towels-24",
+        "quantity": 6,
+        "maxContributionCents": 1200,
+        "pickupWindow": "window-a",
+        "minutesBeforeSession": 20
+      }
+    },
+    {
+      "key": "casey",
+      "displayName": "Casey",
+      "tagline": "Just moved to town",
+      "openingBalanceCents": 10000,
+      "bufferCents": 2000,
+      "memberships": ["costco"],
+      "draftNeed": null,
+      "seededNeed": {
+        "offerKey": "wm-paper-towels-24",
+        "quantity": 6,
+        "maxContributionCents": 2000,
+        "pickupWindow": "window-a",
+        "minutesBeforeSession": 10
+      }
+    }
+  ]
+}

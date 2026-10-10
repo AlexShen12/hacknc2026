@@ -3,7 +3,7 @@
 Working title: **CommonCart**  
 Hackathon: **HackNC**  
 Target sponsor tracks: **Best Use of Nessie with Capital One** and **Best Use of Snowflake API**  
-Status: Agreed scope for a **24-hour hosted demo**; documentation is present and application implementation is pending.
+Status: Agreed scope for a **24-hour hosted demo**; the full journey is implemented and tested in rehearsal mode. Hosting and live sponsor verification are pending.
 
 Implementation guides: [agent instructions](AGENTS.md), [system atlas](atlas.md), [implementation milestones](implementation.md), [conventions](conventions.md) and [technical context](techContext.md).
 
