@@ -161,3 +161,9 @@ Actual account creation, PAT scope/network policy, warehouse access, table privi
 | Club membership | No verification integration established | Remains explicitly simulated for MVP |
 
 Append observations with date, environment, redacted request/operation reference, outcome and limitations. Keep keys, tokens and personal account data out of this file.
+
+### Live browser demo check — October 11, 2026
+
+Validated the organizer-created Costco journey at localhost against live Nessie and the application database labeled Neon Postgres (group `grp_24866ac0…`). Sam's simulated Costco membership allowed opening the 30-roll, $69 fixture. Sam, Alex and Jordan joined for 10 rolls and $23 each; Sam and Jordan funded $46. Jordan left and the $23 return was confirmed before Casey joined the identical share. Casey and Alex funded the remaining contributions; the $69 merchant purchase confirmed, the effective collection balance reached $0, and all three current participants confirmed pickup (**Complete**). The collection ledger displayed **6 of 6 confirmed records verified with Capital One Nessie**; current allocations saved $36 against fixture comparisons.
+
+This run observed `postgres` analytics in sponsor mode, not Snowflake. Costco had no seeded compatible replacement need, so Casey joined explicitly. The original generated explanation still named Jordan after replacement; the allocation table and bank ledger correctly showed Casey. No application code changed and no automated suite was run for this browser validation. See [the exact demo script and screenshot](DEMO_SCRIPT.md).
