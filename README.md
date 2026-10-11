@@ -26,6 +26,10 @@ Rehearsal mode uses fictional retail fixtures, a Postgres-backed simulated bank 
 6. **Find a replacement**. Casey is offered the same 6 rolls for $15. Confirm and contribute as Casey, then contribute as Sam and Riley.
 7. Record the purchase as Alex ($60), then mark all four pickups. The group saves $28.
 
+**Start a group instead:** on the shop page choose **Start my own group**, pick *invite only*, keep auto-pay and auto-purchase on, and start it. Switch to Jordan, open the invite link and join with 6 rolls; then use **Join as Sam / Riley** in Demo controls. When the package fills, every share is paid automatically and the purchase is recorded; the bell shows each shopper's updates.
+
+**Also try:** type "about 5 rolls of paper towels, under $20" in **Describe what you need** (Cortex in sponsor mode, a local parser in rehearsal). Amounts without a known price show an *estimated* comparison. **Wallet** shows each shopper's bank account, bills and verified history; **Insights** shows community analytics (Snowflake SQL in sponsor mode).
+
 Demo controls can also make the next bank operation stay pending, lose its response or be rejected, and can expire the offer, to show recovery paths.
 
 ## Checks

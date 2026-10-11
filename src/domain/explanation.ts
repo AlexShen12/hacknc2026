@@ -19,6 +19,8 @@ export interface ExplanationEvidence {
     quantity: number;
     contributionCents: number;
     baselineCents: number;
+    /** True when the buying-alone price was estimated from the closest known prices. */
+    baselineEstimated?: boolean;
     savingsCents: number;
   }[];
   totalSavingsCents: number;
@@ -30,8 +32,8 @@ const REASON_TEXT: Record<ExclusionReason, string> = {
   offer_not_accepted: "did not choose this product",
   pickup_mismatch: "picks up at a different time or place",
   over_budget: "set a contribution limit below the share price",
-  insufficient_available_funds: "would dip into their bill buffer",
-  no_baseline: "has no comparable single-purchase price",
+  insufficient_available_funds: "wouldn't have enough left for upcoming bills",
+  no_baseline: "has no comparable price for this product",
   no_savings: "would not save money with this share",
   not_selected: "asked later, after the package was already filled",
 };
@@ -45,7 +47,7 @@ function joinNames(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
-/** Deterministic explanation used in rehearsal mode and as the shape Cortex is asked to follow. */
+/** Deterministic explanation written only from the verified calculation. */
 export function templateExplanation(evidence: ExplanationEvidence): string {
   const names = joinNames(evidence.members.map((member) => member.name));
   const sameTerms = evidence.members.every(
@@ -56,8 +58,11 @@ export function templateExplanation(evidence: ExplanationEvidence): string {
   const first = evidence.members[0];
   const shareSentence =
     sameTerms && first
-      ? `Each person takes ${first.quantity} ${evidence.unit} for ${formatCents(first.contributionCents)} instead of ${formatCents(first.baselineCents)} buying separately, saving ${formatCents(first.savingsCents)}.`
+      ? `Each person takes ${first.quantity} ${evidence.unit} for ${formatCents(first.contributionCents)} instead of ${first.baselineEstimated ? "about " : ""}${formatCents(first.baselineCents)} buying separately${first.baselineEstimated ? " (estimated)" : ""}, saving ${formatCents(first.savingsCents)}.`
       : `Each share is priced in proportion to its quantity, and everyone pays less than buying the same amount alone.`;
+  const estimatedNote = evidence.members.some((member) => member.baselineEstimated)
+    ? " Some buying-alone prices are estimated from the closest known package sizes."
+    : "";
   const extras =
     evidence.taxCents === 0 && evidence.feeCents === 0
       ? "This demo offer sets tax and fees to zero."
@@ -70,7 +75,7 @@ export function templateExplanation(evidence: ExplanationEvidence): string {
     `${names} together need exactly the ${evidence.packageQuantity} ${evidence.unit} in one ` +
     `${evidence.retailerLabel} ${evidence.productName} package (${formatCents(evidence.totalCents)} total). ` +
     `${shareSentence} ${extras} Together the group saves ${formatCents(evidence.totalSavingsCents)}, ` +
-    `and everyone picks up ${evidence.pickupLabel}.${exclusionSentence}`
+    `and everyone picks up ${evidence.pickupLabel}.${estimatedNote}${exclusionSentence}`
   );
 }
 
@@ -96,20 +101,27 @@ function evidenceAmounts(evidence: ExplanationEvidence): Set<number> {
 export type ExplanationCheck = { ok: true; text: string } | { ok: false; reason: string };
 
 /**
- * Reject model output that mentions amounts not present in the evidence or claims banking outcomes.
- * Authoritative numbers are always rendered from domain output, never from this text.
+ * Accept model text only when every dollar amount it mentions is one of `allowedCents` and it does
+ * not claim money moved. Authoritative numbers are always rendered from code, never this text.
  */
-export function validateExplanation(raw: unknown, evidence: ExplanationEvidence): ExplanationCheck {
+export function validateNarrative(
+  raw: unknown,
+  allowedCents: ReadonlySet<number>,
+  maxLength = MAX_EXPLANATION_LENGTH,
+): ExplanationCheck {
   if (typeof raw !== "string") return { ok: false, reason: "not_text" };
   const text = raw.trim();
   if (text.length === 0) return { ok: false, reason: "empty" };
-  if (text.length > MAX_EXPLANATION_LENGTH) return { ok: false, reason: "too_long" };
+  if (text.length > maxLength) return { ok: false, reason: "too_long" };
   if (BANKING_CLAIMS.test(text)) return { ok: false, reason: "banking_claim" };
-  const allowed = evidenceAmounts(evidence);
   for (const match of text.matchAll(AMOUNT_PATTERN)) {
     const dollars = Number((match[1] ?? "0").replaceAll(",", ""));
     const cents = dollars * 100 + Number((match[2] ?? "").padEnd(2, "0") || 0);
-    if (!allowed.has(cents)) return { ok: false, reason: "unsupported_amount" };
+    if (!allowedCents.has(cents)) return { ok: false, reason: "unsupported_amount" };
   }
   return { ok: true, text };
+}
+
+export function validateExplanation(raw: unknown, evidence: ExplanationEvidence): ExplanationCheck {
+  return validateNarrative(raw, evidenceAmounts(evidence));
 }

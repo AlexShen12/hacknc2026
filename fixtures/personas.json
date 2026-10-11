@@ -1,6 +1,6 @@
 {
   "scenarioVersion": "featured-dropout-v1",
-  "notice": "Seeded demo shoppers. Club memberships are simulated flags, not verified memberships.",
+  "notice": "Seeded demo shoppers. Club memberships are simulated flags, not verified memberships. Bills are mock records in the shopper's bank account.",
   "defaultPersona": "alex",
   "personas": [
     {
@@ -16,7 +16,14 @@
         "maxContributionCents": 2000,
         "pickupWindow": "window-a"
       },
-      "seededNeed": null
+      "seededNeed": null,
+      "bills": [
+        {
+          "payee": "Spectrum Internet",
+          "amountCents": 5500,
+          "dueInDays": 1
+        }
+      ]
     },
     {
       "key": "jordan",
@@ -32,7 +39,14 @@
         "maxContributionCents": 2000,
         "pickupWindow": "window-a",
         "minutesBeforeSession": 50
-      }
+      },
+      "bills": [
+        {
+          "payee": "Duke Energy",
+          "amountCents": 4200,
+          "dueInDays": 1
+        }
+      ]
     },
     {
       "key": "sam",
@@ -48,7 +62,14 @@
         "maxContributionCents": 2000,
         "pickupWindow": "window-a",
         "minutesBeforeSession": 40
-      }
+      },
+      "bills": [
+        {
+          "payee": "T-Mobile",
+          "amountCents": 3500,
+          "dueInDays": 0
+        }
+      ]
     },
     {
       "key": "riley",
@@ -64,7 +85,14 @@
         "maxContributionCents": 2000,
         "pickupWindow": "window-a",
         "minutesBeforeSession": 30
-      }
+      },
+      "bills": [
+        {
+          "payee": "Student loan",
+          "amountCents": 2500,
+          "dueInDays": 1
+        }
+      ]
     },
     {
       "key": "taylor",
@@ -80,7 +108,14 @@
         "maxContributionCents": 1200,
         "pickupWindow": "window-a",
         "minutesBeforeSession": 20
-      }
+      },
+      "bills": [
+        {
+          "payee": "Rent share",
+          "amountCents": 7000,
+          "dueInDays": 1
+        }
+      ]
     },
     {
       "key": "casey",
@@ -96,7 +131,14 @@
         "maxContributionCents": 2000,
         "pickupWindow": "window-a",
         "minutesBeforeSession": 10
-      }
+      },
+      "bills": [
+        {
+          "payee": "Renter's insurance",
+          "amountCents": 1800,
+          "dueInDays": 1
+        }
+      ]
     }
   ]
 }

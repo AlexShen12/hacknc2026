@@ -38,7 +38,8 @@ export type ReadinessBlocker =
   | "return_unresolved"
   | "departure_in_progress"
   | "total_mismatch"
-  | "collection_balance_mismatch";
+  | "collection_balance_mismatch"
+  | "provider_record_mismatch";
 
 /**
  * A group may purchase only when every active member's contribution and every departure return is
@@ -48,6 +49,8 @@ export function readinessBlockers(input: {
   allocations: FundingAllocation[];
   totalCents: number;
   collectionBalanceCents: number | null;
+  /** False when a confirmed operation's provider record is missing or differs. */
+  providerRecordsVerified?: boolean;
 }): ReadinessBlocker[] {
   const blockers = new Set<ReadinessBlocker>();
   for (const allocation of input.allocations) {
@@ -68,10 +71,12 @@ export function readinessBlockers(input: {
   if (input.collectionBalanceCents !== null && input.collectionBalanceCents !== retained) {
     blockers.add("collection_balance_mismatch");
   }
+  if (input.providerRecordsVerified === false) blockers.add("provider_record_mismatch");
   return [...blockers];
 }
 
 export const WITHDRAWABLE_STATUSES: ReadonlySet<GroupStatus> = new Set([
+  "open",
   "awaiting_confirmation",
   "funding",
   "returning_contribution",
@@ -80,6 +85,7 @@ export const WITHDRAWABLE_STATUSES: ReadonlySet<GroupStatus> = new Set([
 ]);
 
 export const CANCELLABLE_STATUSES: ReadonlySet<GroupStatus> = new Set([
+  "open",
   "awaiting_confirmation",
   "funding",
   "returning_contribution",

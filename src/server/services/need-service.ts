@@ -7,7 +7,7 @@ import { needs, offers } from "@/server/db/schema";
 import { runtime } from "@/server/runtime";
 import {
   appendSessionEvent,
-  enqueueNeed,
+
   type NeedRow,
   type OfferRow,
 } from "@/server/services/records";
@@ -184,7 +184,6 @@ export async function createNeed(
         .returning();
     }
     if (!row) throw new Error("Need write failed");
-    await enqueueNeed(tx, row);
     await appendSessionEvent(tx, {
       sessionId: session.id,
       actor: shopperId,

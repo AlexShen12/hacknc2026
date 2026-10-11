@@ -38,7 +38,7 @@ const totalCents = allocations.reduce((sum, item) => sum + item.contributionCent
 if (totalCents !== offer.totalCents) throw new AllocationInvariantError();
 ```
 
-The optimizer uses largest-remainder allocation. Savings equal a participant's supplied, equivalent-quantity baseline minus their complete allocated cost. Reject offers without a usable comparison baseline rather than fabricating savings. Every included participant must have strictly positive savings and remain within their contribution ceiling.
+The optimizer uses largest-remainder allocation. Savings equal a participant's equivalent-quantity baseline minus their complete allocated cost. When a quantity has no known baseline, estimate it only from the same offer's known prices (`estimateBaseline` in `src/domain/baseline.ts`). Interpolate between the two closest known quantities, or scale the nearest endpoint's per-unit price outside the known range. Persist the `baselineEstimated` flag and label the price "estimated"/"about" everywhere it appears, including explanations. Reject offers with no known baselines rather than fabricating savings. Every included participant must have strictly positive savings and remain within their contribution ceiling.
 
 ## HTTP and authorization
 

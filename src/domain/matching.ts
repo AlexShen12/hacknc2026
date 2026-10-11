@@ -1,3 +1,4 @@
+import { estimateBaseline } from "@/domain/baseline";
 import { allocateByQuantity, minimumShareCents } from "@/domain/money";
 import type {
   CandidateExclusion,
@@ -27,8 +28,9 @@ export interface MatchResult {
   exclusions: CandidateExclusion[];
 }
 
+/** Known or estimated comparison price; see `estimateBaseline`. */
 export function baselineFor(offer: OfferTerms, quantity: number): number | null {
-  return offer.baselines.find((baseline) => baseline.quantity === quantity)?.baselineCents ?? null;
+  return estimateBaseline(offer.baselines, quantity)?.baselineCents ?? null;
 }
 
 export function isOfferOpen(offer: OfferTerms, now: Date): boolean {
@@ -96,8 +98,9 @@ function buildPlan(
   const allocations: ProposedAllocation[] = [];
   for (const need of members) {
     const contributionCents = shares.get(need.id) ?? 0;
-    const baselineCents = baselineFor(offer, need.quantity);
-    if (baselineCents === null) return null;
+    const estimate = estimateBaseline(offer.baselines, need.quantity);
+    if (estimate === null) return null;
+    const { baselineCents } = estimate;
     const available = shoppers.get(need.shopperId)?.availableCents;
     if (contributionCents > need.maxContributionCents) return null;
     if (available != null && contributionCents > available) return null;
@@ -109,6 +112,7 @@ function buildPlan(
       quantity: need.quantity,
       contributionCents,
       baselineCents,
+      baselineEstimated: estimate.estimated,
       savingsCents,
     });
   }
@@ -267,6 +271,7 @@ export interface ReplacementSlot {
 export interface ReplacementCandidate {
   need: MatchNeed;
   baselineCents: number;
+  baselineEstimated: boolean;
   savingsCents: number;
 }
 
@@ -285,8 +290,9 @@ export function rankReplacements(input: {
   excludedShopperIds: ReadonlySet<string>;
 }): ReplacementCandidate[] {
   const { slot, offer } = input;
-  const baselineCents = baselineFor(offer, slot.quantity);
-  if (baselineCents === null || baselineCents - slot.contributionCents <= 0) return [];
+  const estimate = estimateBaseline(offer.baselines, slot.quantity);
+  if (estimate === null || estimate.baselineCents - slot.contributionCents <= 0) return [];
+  const { baselineCents } = estimate;
 
   return input.candidates
     .filter((need) => {
@@ -303,5 +309,10 @@ export function rankReplacements(input: {
       return available == null || available >= slot.contributionCents;
     })
     .sort(compareRequestAge)
-    .map((need) => ({ need, baselineCents, savingsCents: baselineCents - slot.contributionCents }));
+    .map((need) => ({
+      need,
+      baselineCents,
+      baselineEstimated: estimate.estimated,
+      savingsCents: baselineCents - slot.contributionCents,
+    }));
 }

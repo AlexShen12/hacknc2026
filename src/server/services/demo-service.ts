@@ -1,9 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { DomainError } from "@/domain/errors";
+import { quoteShareCents } from "@/domain/open-group";
 import { getConfig } from "@/server/config";
 import { getDb } from "@/server/db/client";
-import { demoSessions, groups, offers } from "@/server/db/schema";
+import { demoSessions, groups, needs, offers } from "@/server/db/schema";
 import type { Providers } from "@/server/providers";
 import { runtime } from "@/server/runtime";
 import {
@@ -13,9 +14,10 @@ import {
   reconcileOperation,
   retryFailedOperation,
 } from "@/server/services/funding-service";
-import { appendSessionEvent, enqueueOffer } from "@/server/services/records";
+import { joinGroup } from "@/server/services/group-builder-service";
+import { currentMembers, joinSlotFor, loadGroupBundle } from "@/server/services/group-view";
+import { appendSessionEvent } from "@/server/services/records";
 import { getShopper, type SessionRow } from "@/server/services/session-service";
-import { syncSession } from "@/server/services/sync-service";
 import {
   cancelGroup,
   confirmPickup,
@@ -40,6 +42,7 @@ export const demoActionSchema = z.discriminatedUnion("action", [
   personaAction.extend({ action: z.literal("replace") }),
   personaAction.extend({ action: z.literal("cancel") }),
   personaAction.extend({ action: z.literal("purchase") }),
+  personaAction.extend({ action: z.literal("join") }),
   z.object({ action: z.literal("reconcile"), operationId: z.string().min(1) }),
   z.object({ action: z.literal("retry_operation"), operationId: z.string().min(1) }),
   z.object({
@@ -47,7 +50,6 @@ export const demoActionSchema = z.discriminatedUnion("action", [
     fault: z.enum(["pending", "unknown", "reject"]).nullable(),
   }),
   z.object({ action: z.literal("expire_offer"), groupId: z.string().min(1) }),
-  z.object({ action: z.literal("sync") }),
 ]);
 
 export type DemoAction = z.infer<typeof demoActionSchema>;
@@ -94,6 +96,20 @@ export async function runDemoAction(providers: Providers, session: SessionRow, i
       await run();
       return { ok: true };
     }
+    case "join": {
+      await getShopper(session.id, input.actorShopperId);
+      const ctx: ActionContext = {
+        session,
+        shopperId: input.actorShopperId,
+        actor: `demo:${input.actorShopperId}`,
+        demoControl: true,
+      };
+      await joinGroup(providers, ctx, input.groupId, input.expectedVersion, {
+        ...(await demoJoinTerms(session, input.actorShopperId, input.groupId)),
+        autoPay: true,
+      });
+      return { ok: true };
+    }
     case "reconcile":
       return { operation: await reconcileOperation(providers, session, input.operationId) };
     case "retry_operation":
@@ -130,7 +146,6 @@ export async function runDemoAction(providers: Providers, session: SessionRow, i
           .set({ expiresAt: runtime.now(), version: sql`${offers.version} + 1` })
           .where(and(eq(offers.id, group.offerId), eq(offers.sessionId, session.id)))
           .returning();
-        if (offer) await enqueueOffer(tx, offer);
         await appendSessionEvent(tx, {
           sessionId: session.id,
           actor: "operator",
@@ -141,7 +156,45 @@ export async function runDemoAction(providers: Providers, session: SessionRow, i
       await advanceGroup(providers, session, group.id);
       return { ok: true };
     }
-    case "sync":
-      return syncSession(session.id, providers);
   }
+}
+
+/**
+ * Terms a seeded persona would join with: its own open request for this product when that fits,
+ * otherwise the smallest comparable quantity still available, priced at the quoted share.
+ */
+async function demoJoinTerms(session: SessionRow, shopperId: string, groupId: string) {
+  const db = getDb();
+  const bundle = await loadGroupBundle(db, session.id, groupId);
+  const slot = joinSlotFor(bundle);
+  if (!slot) throw new DomainError("INCOMPATIBLE_STATE", "This group isn't taking new members.");
+  const [need] = await db
+    .select()
+    .from(needs)
+    .where(
+      and(
+        eq(needs.sessionId, session.id),
+        eq(needs.shopperId, shopperId),
+        eq(needs.status, "forming"),
+        sql`${needs.acceptedOfferIds} @> ${JSON.stringify([bundle.offer.id])}::jsonb`,
+      ),
+    );
+  if (slot.mode === "slot") {
+    return {
+      quantity: slot.quantity,
+      maxContributionCents: Math.max(need?.maxContributionCents ?? 0, slot.contributionCents),
+    };
+  }
+  const remaining =
+    bundle.offer.packageQuantity -
+    currentMembers(bundle.allocations).reduce((sum, row) => sum + row.quantity, 0);
+  const quantity =
+    need && need.quantity <= remaining
+      ? need.quantity
+      : (bundle.offer.baselines
+          .map((row) => row.quantity)
+          .filter((value) => value <= remaining)
+          .sort((a, b) => a - b)[0] ?? remaining);
+  const quote = quoteShareCents(bundle.offer.totalCents, quantity, bundle.offer.packageQuantity);
+  return { quantity, maxContributionCents: need?.maxContributionCents ?? quote };
 }

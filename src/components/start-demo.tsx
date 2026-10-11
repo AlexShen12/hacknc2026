@@ -46,12 +46,12 @@ export function StartDemo({
           }
         >
           <Landmark size={18} aria-hidden />
-          {busy === "sponsor" ? "Creating sandbox accounts…" : "Sponsor mode (Nessie + Snowflake)"}
+          {busy === "sponsor" ? "Creating sandbox accounts…" : "Live mode (Capital One Nessie)"}
         </Button>
       </div>
       {!sponsorConfigured ? (
         <p className="text-sm text-muted">
-          Sponsor mode is unavailable here because Nessie/Snowflake credentials are not configured.
+          Live mode is unavailable here because Nessie credentials are not configured.
           Rehearsal mode uses a local simulated bank ledger and local analytics.
         </p>
       ) : null}

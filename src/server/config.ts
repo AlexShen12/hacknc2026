@@ -17,13 +17,8 @@ const envSchema = z.object({
     .transform((value) => value === "true"),
   NESSIE_BASE_URL: optional,
   NESSIE_API_KEY: optional,
-  SNOWFLAKE_ACCOUNT_URL: optional,
-  SNOWFLAKE_PAT: optional,
-  SNOWFLAKE_ROLE: optional,
-  SNOWFLAKE_WAREHOUSE: optional,
-  SNOWFLAKE_DATABASE: optional,
-  SNOWFLAKE_SCHEMA: optional,
-  SNOWFLAKE_MODEL: optional,
+  NEON_API_KEY: optional,
+  NEON_PROJECT_ID: optional,
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -41,33 +36,25 @@ export interface NessieConfig {
   apiKey: string;
 }
 
-export interface SnowflakeConfig {
-  accountUrl: string;
-  pat: string;
-  role: string;
-  warehouse: string;
-  database: string;
-  schema: string;
-  model: string;
+export interface NeonConfig {
+  apiKey: string;
+  projectId: string;
 }
 
-const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]{0,254}$/;
+/** Accept host-only values (e.g. `example.com`) and strip trailing slashes. */
+export function normalizeUrl(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, "");
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
 
-/** Sponsor sessions require every credential; a missing value never downgrades to rehearsal. */
-export function getSponsorConfig(config = getConfig()): {
-  nessie: NessieConfig;
-  snowflake: SnowflakeConfig;
-} {
+/**
+ * Sponsor sessions use live Capital One Nessie banking; analytics always run on the application's
+ * Postgres database (Neon when deployed). A missing Nessie value never downgrades to rehearsal.
+ */
+export function getSponsorConfig(config = getConfig()): { nessie: NessieConfig } {
   const required = {
     NESSIE_BASE_URL: config.NESSIE_BASE_URL,
     NESSIE_API_KEY: config.NESSIE_API_KEY,
-    SNOWFLAKE_ACCOUNT_URL: config.SNOWFLAKE_ACCOUNT_URL,
-    SNOWFLAKE_PAT: config.SNOWFLAKE_PAT,
-    SNOWFLAKE_ROLE: config.SNOWFLAKE_ROLE,
-    SNOWFLAKE_WAREHOUSE: config.SNOWFLAKE_WAREHOUSE,
-    SNOWFLAKE_DATABASE: config.SNOWFLAKE_DATABASE,
-    SNOWFLAKE_SCHEMA: config.SNOWFLAKE_SCHEMA,
-    SNOWFLAKE_MODEL: config.SNOWFLAKE_MODEL,
   };
   const missing = Object.entries(required)
     .filter(([, value]) => !value)
@@ -79,31 +66,32 @@ export function getSponsorConfig(config = getConfig()): {
       { missing },
     );
   }
-  for (const key of [
-    "SNOWFLAKE_ROLE",
-    "SNOWFLAKE_WAREHOUSE",
-    "SNOWFLAKE_DATABASE",
-    "SNOWFLAKE_SCHEMA",
-  ] as const) {
-    if (!IDENTIFIER.test(required[key] ?? "")) {
-      throw new DomainError("SPONSOR_NOT_CONFIGURED", `${key} is not a valid identifier.`);
-    }
-  }
   return {
     nessie: {
-      baseUrl: (config.NESSIE_BASE_URL ?? "").replace(/\/$/, ""),
+      baseUrl: normalizeUrl(config.NESSIE_BASE_URL ?? ""),
       apiKey: config.NESSIE_API_KEY ?? "",
     },
-    snowflake: {
-      accountUrl: (config.SNOWFLAKE_ACCOUNT_URL ?? "").replace(/\/$/, ""),
-      pat: config.SNOWFLAKE_PAT ?? "",
-      role: config.SNOWFLAKE_ROLE ?? "",
-      warehouse: config.SNOWFLAKE_WAREHOUSE ?? "",
-      database: config.SNOWFLAKE_DATABASE ?? "",
-      schema: config.SNOWFLAKE_SCHEMA ?? "",
-      model: config.SNOWFLAKE_MODEL ?? "",
-    },
   };
+}
+
+/** Neon API access for database snapshots; null when not configured. */
+export function getNeonConfig(config = getConfig()): NeonConfig | null {
+  if (!config.NEON_API_KEY || !config.NEON_PROJECT_ID) return null;
+  return { apiKey: config.NEON_API_KEY, projectId: config.NEON_PROJECT_ID };
+}
+
+/** Hostname of the application database, used to label it and find its Neon branch. */
+export function databaseHost(config = getConfig()): string | null {
+  try {
+    return new URL(config.DATABASE_URL).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/** "Neon Postgres" when the application database is hosted on Neon, otherwise "Postgres". */
+export function databaseLabel(config = getConfig()): string {
+  return databaseHost(config)?.endsWith(".neon.tech") ? "Neon Postgres" : "Postgres";
 }
 
 export function isSponsorConfigured(): boolean {

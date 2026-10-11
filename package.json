@@ -18,10 +18,9 @@
     "test": "vitest run --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:generate": "node --env-file-if-exists=.env node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "node --env-file-if-exists=.env node_modules/drizzle-kit/bin.cjs migrate",
     "demo:seed": "tsx --env-file-if-exists=.env scripts/demo-seed.ts",
-    "snowflake:setup": "tsx --env-file-if-exists=.env scripts/snowflake-setup.ts",
     "verify:sponsors": "tsx --env-file-if-exists=.env scripts/verify-sponsors.ts"
   },
   "dependencies": {

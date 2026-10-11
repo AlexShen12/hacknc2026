@@ -2,6 +2,7 @@ import { ShoppingBasket } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { NotificationsBell } from "@/components/notifications-bell";
 import { OperatorPanel } from "@/components/operator-panel";
 import { PersonaSwitcher } from "@/components/persona-switcher";
 import { Badge } from "@/components/ui/badge";
@@ -44,9 +45,18 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   {view.mode === "sponsor" ? "Sponsor mode" : "Rehearsal mode"}
                 </Badge>
                 <PersonaSwitcher session={view} />
-                <Link href="/shop" className="text-sm font-semibold text-savings hover:underline">
-                  My shopping
-                </Link>
+                <NotificationsBell shopperId={view.selectedShopperId} />
+                <nav aria-label="Main" className="flex items-center gap-3 text-sm font-semibold">
+                  <Link href="/shop" className="text-savings hover:underline">
+                    Shop
+                  </Link>
+                  <Link href="/wallet" className="text-savings hover:underline">
+                    Wallet
+                  </Link>
+                  <Link href="/insights" className="text-savings hover:underline">
+                    Insights
+                  </Link>
+                </nav>
                 {view.demoControlsEnabled ? <OperatorPanel /> : null}
               </div>
             ) : null}

@@ -12,9 +12,12 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type {
+  AllocationState,
   ComparisonBaseline,
   ExclusionReason,
+  GroupOrigin,
   GroupStatus,
+  GroupVisibility,
   Membership,
   NeedStatus,
   OperationKind,
@@ -186,21 +189,21 @@ export interface OfferSnapshot {
 }
 
 export interface AnalyticsSnapshot {
-  source: "snowflake" | "local";
+  /** Engine that answered the candidate query, e.g. "Neon Postgres". */
+  source: string;
   queryId: string | null;
   candidateCount: number;
-  syncedThroughOutboxId: number | null;
   queriedAt: string;
   exclusions: { needId: string; shopperId: string; reason: ExclusionReason }[];
 }
 
 export interface StoredExplanation {
   proposalVersion: number;
-  source: "cortex" | "template";
+  /** Written by deterministic code from the verified numbers. */
+  source: "template";
   text: string | null;
   status: "ready" | "unavailable";
   reason?: string;
-  requestId?: string | null;
   generatedAt: string;
 }
 
@@ -228,10 +231,19 @@ export const groups = pgTable(
     pickupWindow: text("pickup_window").notNull(),
     eventSeq: integer("event_seq").notNull().default(0),
     explanation: jsonb("explanation").$type<StoredExplanation | null>(),
+    origin: text("origin").$type<GroupOrigin>().notNull().default("matched"),
+    visibility: text("visibility").$type<GroupVisibility>().notNull().default("private"),
+    inviteCode: text("invite_code"),
+    autoPurchase: boolean("auto_purchase").notNull().default(false),
+    autoReplace: boolean("auto_replace").notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (table) => [index("groups_session_idx").on(table.sessionId, table.createdAt)],
+  (table) => [
+    index("groups_session_idx").on(table.sessionId, table.createdAt),
+    uniqueIndex("groups_invite_code_key").on(table.inviteCode),
+    index("groups_open_idx").on(table.sessionId, table.status, table.offerId),
+  ],
 );
 
 export interface ConsentRecord {
@@ -264,12 +276,16 @@ export const allocations = pgTable(
     quantity: integer("quantity").notNull(),
     contributionCents: integer("contribution_cents").notNull(),
     baselineCents: integer("baseline_cents").notNull(),
+    /** Comparison price estimated from the closest known prices rather than a known fixture. */
+    baselineEstimated: boolean("baseline_estimated").notNull().default(false),
     savingsCents: integer("savings_cents").notNull(),
-    state: text("state").$type<"active" | "departing" | "departed" | "picked_up">().notNull(),
+    state: text("state").$type<AllocationState>().notNull(),
     consent: jsonb("consent").$type<ConsentRecord | null>(),
     contributionOperationId: text("contribution_operation_id"),
     returnOperationId: text("return_operation_id"),
     replacesAllocationId: text("replaces_allocation_id"),
+    /** Member pre-authorized sending their contribution once the group's terms are frozen. */
+    autoPay: boolean("auto_pay").notNull().default(false),
     departedAt: timestamp("departed_at", { withTimezone: true }),
     pickedUpAt: timestamp("picked_up_at", { withTimezone: true }),
     createdAt: createdAt(),
@@ -295,9 +311,10 @@ export const bankOperations = pgTable(
     sessionId: text("session_id")
       .notNull()
       .references(() => demoSessions.id),
-    groupId: text("group_id")
-      .notNull()
-      .references(() => groups.id),
+    /** Null for wallet operations (top-ups and bill payments) that belong to no group. */
+    groupId: text("group_id").references(() => groups.id),
+    /** The shopper a wallet operation belongs to; group operations use the allocation. */
+    shopperId: text("shopper_id").references(() => shoppers.id),
     allocationId: text("allocation_id"),
     kind: text("kind").$type<OperationKind>().notNull(),
     operationKey: text("operation_key").notNull(),
@@ -360,26 +377,6 @@ export const workflowEvents = pgTable(
   ],
 );
 
-export const syncOutbox = pgTable(
-  "sync_outbox",
-  {
-    id: bigserial("id", { mode: "number" }).primaryKey(),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => demoSessions.id),
-    entityType: text("entity_type").$type<"offer" | "need" | "group" | "operation">().notNull(),
-    entityId: text("entity_id").notNull(),
-    entityVersion: integer("entity_version").notNull(),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-    status: text("status").$type<"pending" | "delivered" | "failed">().notNull(),
-    attempts: integer("attempts").notNull().default(0),
-    lastError: text("last_error"),
-    createdAt: createdAt(),
-    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
-  },
-  (table) => [index("sync_outbox_pending_idx").on(table.sessionId, table.status, table.id)],
-);
-
 /** Rehearsal-only banking simulation. Sponsor sessions never read or write these tables. */
 export const rehearsalAccounts = pgTable(
   "rehearsal_accounts",
@@ -388,7 +385,9 @@ export const rehearsalAccounts = pgTable(
     sessionId: text("session_id")
       .notNull()
       .references(() => demoSessions.id),
-    ownerKind: text("owner_kind").$type<"shopper" | "collection" | "merchant">().notNull(),
+    ownerKind: text("owner_kind")
+      .$type<"shopper" | "collection" | "merchant" | "external">()
+      .notNull(),
     label: text("label").notNull(),
     balanceCents: integer("balance_cents").notNull(),
     createdAt: createdAt(),
@@ -403,7 +402,7 @@ export const rehearsalTransactions = pgTable(
     sessionId: text("session_id")
       .notNull()
       .references(() => demoSessions.id),
-    kind: text("kind").$type<"transfer" | "purchase">().notNull(),
+    kind: text("kind").$type<"transfer" | "purchase" | "deposit" | "withdrawal">().notNull(),
     payerAccountId: text("payer_account_id")
       .notNull()
       .references(() => rehearsalAccounts.id),
@@ -417,4 +416,46 @@ export const rehearsalTransactions = pgTable(
     settledAt: timestamp("settled_at", { withTimezone: true }),
   },
   (table) => [index("rehearsal_transactions_description_idx").on(table.description)],
+);
+
+/** Rehearsal-only bills; sponsor sessions read bills from Nessie. */
+export const rehearsalBills = pgTable(
+  "rehearsal_bills",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => demoSessions.id),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => rehearsalAccounts.id),
+    payee: text("payee").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    dueDate: text("due_date").notNull(),
+    status: text("status").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [index("rehearsal_bills_account_idx").on(table.accountId)],
+);
+
+/** Per-shopper activity feed, written in the same transaction as the workflow change. */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => demoSessions.id),
+    shopperId: text("shopper_id")
+      .notNull()
+      .references(() => shoppers.id),
+    groupId: text("group_id"),
+    kind: text("kind").notNull(),
+    message: text("message").notNull(),
+    createdAt: createdAt(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("notifications_shopper_idx").on(table.sessionId, table.shopperId, table.createdAt),
+  ],
 );

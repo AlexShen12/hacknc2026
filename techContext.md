@@ -72,9 +72,9 @@ Document these in a future `.env.example` with empty credential placeholders. Ne
 | `APP_ORIGIN` | Deployed HTTPS origin or `http://localhost:3000` locally; used for mutation-origin checks |
 | `PROVIDER_MODE` | New-session default: `rehearsal`; explicitly set `sponsor` after integration checks |
 | `DEMO_CONTROLS_ENABLED` | `true` for the hackathon demo; controls operate only on that session's seeded actors |
-| `NESSIE_BASE_URL` | Documented server candidate: `https://prod-api.nessieisreal.com`; verify with sponsor credentials |
+| `NESSIE_BASE_URL` | `https://prod-api.nessieisreal.com` (verified October 10, 2026); a trailing slash is accepted |
 | `NESSIE_API_KEY` | Server-only Nessie key, sent using the provider's query parameter |
-| `SNOWFLAKE_ACCOUNT_URL` | Full account URL, `https://<account-identifier>.snowflakecomputing.com` |
+| `SNOWFLAKE_ACCOUNT_URL` | Account URL `https://<account-identifier>.snowflakecomputing.com`; a bare host is accepted and given `https://` |
 | `SNOWFLAKE_PAT` | Programmatic access token with the required permitted role |
 | `SNOWFLAKE_ROLE` | Selected SQL role; configure the user's default role appropriately for Cortex |
 | `SNOWFLAKE_WAREHOUSE` | Warehouse for SQL queries; small demo warehouse with auto-suspend configured |
@@ -93,11 +93,31 @@ Session mode is persisted. Changing `PROVIDER_MODE` affects new sessions only. M
 - Public documentation observed during planning describes a banking simulation with customers, accounts, bills, transfers, purchases and merchants. Authentication uses `?key=...`.
 - The rendered API reference identifies `https://prod-api.nessieisreal.com` as its server. The HackNC page points to the older `api.nessieisreal.com` host; confirm the appropriate sponsor host before using credentials.
 - Documented setup operations include `POST /customers`, `POST /customers/{id}/accounts`, `POST /accounts/{id}/deposits`; the quick start also shows `POST /accounts/{id}/transfers`. Account reads include `GET /accounts/{id}` and `GET /customers/{id}/accounts`.
-- Public transfer/purchase operation lists were incomplete relative to the quick start. Do not treat a remembered SDK path as verified. Record the actual transfer-create, purchase-create and account-operation listing paths from the sponsor reference and authenticated checks before implementing live writes.
 - Read-back references include `GET /transfers/{transfer_id}` and the documented singular `GET /purchase/{purchase_id}`. Validate actual responses rather than mechanically pluralizing paths.
-- Account/transfer properties are labeled numeric/integer in the public docs. Their money unit, fractional precision, balance effects, pending statuses, settlement timing and duplicate-request behavior have **not been verified**.
 
-The smoke check must create dedicated mock profiles/accounts, perform a known contribution and return, observe IDs/status/balance changes, then record a known purchase. Confirm whether correlation descriptions or account transaction listings allow recovery after a response is lost. If no reliable lookup exists, classify lost-response writes as unknown and require operator reconciliation.
+**Observed with authenticated calls, October 10, 2026, `https://prod-api.nessieisreal.com`** (`npm run verify:sponsors`). These observations replace the earlier assumptions:
+
+- `POST /customers` and `POST /customers/{id}/accounts` return `201` with `objectCreated._id`. `GET /accounts/{id}` returns `balance` and `account_number`. `PUT /accounts/{id}` requires `nickname` and cannot set `balance`.
+- `POST /merchants` requires `category` as a **string** (an array is rejected with a pydantic validation error).
+- `POST /accounts/{id}/transfers` requires `status` and accepts only `status`, `amount`, `transaction_date` and `description`; `medium`, `payee_id` and every other payee field name tried are rejected as extra fields. The transfer record therefore has **no payee**.
+- `status` is stored exactly as sent (an arbitrary value such as `bogus` is accepted) and is never advanced by the service. `PUT /transfers/{id}` can change it.
+- **Balances never change.** After completed transfers, withdrawals, deposits and purchases, `GET /accounts/{id}` still returns the opening balance.
+- Amounts are stored as integers: a `10.5` withdrawal was stored as `10`.
+- `GET /transfers/{id}` returns the identifier as `id` (not `_id`). `GET /purchase/{id}` works; `GET /purchases/{id}` returns `403 Missing Authentication Token`. Purchases record `payer_id` equal to the paying account.
+- `GET /accounts/{id}/transfers` and `GET /accounts/{id}/purchases` list records with their descriptions; an account with no transfers returns `404 "No transfers found for this account"`.
+- The OpenAPI document is not publicly served (`/openapi.json` returns 403); the docs site's reference describes fields only.
+
+- **Bills (observed October 11, 2026).** `POST /accounts/{id}/bills` requires `status`, `payee` and `payment_amount` (fractional values accepted) and returns `201` with `_id`, `account_id`, `creation_date` and `upcoming_payment_date`. `GET /accounts/{id}/bills` returns `[]` when there are none.
+  - A bill created **without `recurring_date`** is accepted, but every later `GET /accounts/{id}/bills` for that account fails with `400 "2 validation errors for Bill"` (`recurring_date`, `upcoming_payment_date` missing). Always send `recurring_date`.
+  - `upcoming_payment_date` rolls a bill whose recurring day equals today's UTC date to the next month. Use the `payment_date` we set as the due date.
+  - Bills do not change the balance.
+
+Adapter decisions based on these observations (`src/server/providers/banking/nessie.ts`):
+
+- Amounts are recorded as integer **cents** (CommonCart's convention, since the service stores integers and moves no money); each description carries the formatted dollar amount.
+- A contribution, return or purchase is one record on the paying account with `status: "completed"`. Descriptions start with the operation correlation and include the destination (`CommonCart <key> | to:<account> | $15.00`).
+- Correlation lookup is verified: a lost response is recovered by listing the paying account and matching the description prefix.
+- `capabilities.balanceEffects` is false, so effective balances are the Nessie opening balance adjusted by confirmed records (`src/server/services/balance-service.ts`). Before purchase every confirmed record is re-read by ID and its amount and status compared; any mismatch blocks readiness (`provider_record_mismatch`).
 
 Use a typed adapter to normalize provider amounts and statuses. Native retry behavior is not assumed. Do not promise real escrow, a real merchant order, automatic refunds or immediate settlement.
 
@@ -134,9 +154,9 @@ Actual account creation, PAT scope/network policy, warehouse access, table privi
 | --- | --- | --- |
 | Package release metadata | **Observed Oct 10, 2026:** exact-version install with committed lockfile; `npm ci`, typecheck (`next typegen` + TypeScript 7.0.2 `tsc`), lint, tests and `next build` (Next 16.4.0 with Turbopack, which ran its TypeScript step on TS 7.0.2) all pass. Local runtime was Node 25.8.1 (`EBADENGINE` warning against `24.x`); Node 24.21.0 compatibility not yet re-run | Re-run the suite on Node 24.21.0 |
 | Hosting compatibility | Vercel docs list Node 24.x; Neon documents Postgres 18 support. Local Docker `postgres:18` applies the migration and passes integration tests | Actual deployed runtime/database version and working application connection |
-| Nessie capabilities | Public documentation only. Adapter `src/server/providers/banking/nessie.ts` **assumes** decimal-dollar amounts, the paths in `NESSIE_PATHS` (including singular `GET /purchase/{id}`), status names `pending`/`executed`/`completed`/`cancelled`, and no correlation lookup. Unit-tested only with fake responses | Verified host, paths, amount conversion, IDs/statuses, settlement behavior and sandbox operation references |
-| Snowflake SQL | Public API documentation only. Adapter uses `POST /api/v2/statements` with PAT headers, positional `TEXT`/`FIXED` bindings, `requestId`/`retry=true`, async handle polling and partitions; schema in `snowflake/schema.sql`. Unit-tested with fake responses | Successful authenticated query, synchronized demo rows and recorded query/statement reference |
-| Cortex | Public API/model documentation only. Adapter posts non-streaming chat completions and the domain validator rejects unsupported amounts or banking claims | Successful response through the configured Snowflake account and default role |
+| Nessie capabilities | **Verified Oct 10, 2026** (see observations above): provisioning, contribution, return and purchase records read back by ID and by correlation lookup; the full funded-dropout journey ran through the application services against live Nessie (session `ses_…`, seven confirmed records, status `fulfilled`, $28 saved) | Re-run before the demo; record any change in behavior |
+| Snowflake SQL | **Blocked:** on Oct 10, 2026 the PAT returned `401` code `390432` "Network policy is required"; on Oct 11 the account returned `401` code `390507` "Your account has been locked." The candidate, demand and four insight statements are unit-tested with fake responses only | A network policy (or authentication policy) for the PAT user, then a successful `verify:sponsors` run and `npm run snowflake:setup` |
+| Cortex | **Blocked Oct 10, 2026** by the same PAT network-policy error (`401`) | Successful response through the configured Snowflake account and default role |
 | Retail scraping | No scraping attempted | Inspectable source observation and validated imported offer, or keep fixtures |
 | Club membership | No verification integration established | Remains explicitly simulated for MVP |
 

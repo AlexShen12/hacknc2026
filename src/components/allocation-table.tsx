@@ -1,6 +1,7 @@
 import { Crown, UserPlus } from "lucide-react";
 import { OperationStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
+import { hasLeft } from "@/domain/types";
 import { formatCents } from "@/lib/format";
 import type { AllocationView, GroupView } from "@/lib/view-types";
 
@@ -14,7 +15,7 @@ export function AllocationTable({
 }) {
   const rows = showFunding
     ? group.allocations
-    : group.allocations.filter((row) => row.state !== "departed");
+    : group.allocations.filter((row) => !hasLeft(row.state));
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-left text-sm">
@@ -53,9 +54,7 @@ export function AllocationTable({
             <tr
               key={row.id}
               className={
-                row.state === "departed"
-                  ? "border-t border-line text-muted"
-                  : "border-t border-line"
+                hasLeft(row.state) ? "border-t border-line text-muted" : "border-t border-line"
               }
             >
               <th scope="row" className="py-2.5 pr-3 font-semibold">
@@ -78,8 +77,19 @@ export function AllocationTable({
                 {row.quantity} {group.offer.unit}
               </td>
               <td className="py-2.5 pr-3 font-semibold">{formatCents(row.contributionCents)}</td>
-              <td className="py-2.5 pr-3 text-muted line-through decoration-muted/50">
-                {formatCents(row.baselineCents)}
+              <td className="py-2.5 pr-3 text-muted">
+                <span className="line-through decoration-muted/50">
+                  {row.baselineEstimated ? "≈ " : ""}
+                  {formatCents(row.baselineCents)}
+                </span>
+                {row.baselineEstimated ? (
+                  <span
+                    className="ml-1 text-xs"
+                    title="Estimated from the closest known package sizes"
+                  >
+                    est.
+                  </span>
+                ) : null}
               </td>
               <td className="py-2.5 pr-3 font-semibold text-savings">
                 {formatCents(row.savingsCents)}
@@ -99,6 +109,7 @@ export function AllocationTable({
 }
 
 function termsLabel(row: AllocationView) {
+  if (row.state === "released") return <Badge>Left before it filled</Badge>;
   if (row.state === "departed") return <Badge>Left the group</Badge>;
   if (row.state === "departing") return <Badge tone="warn">Leaving</Badge>;
   if (row.state === "picked_up") return <Badge tone="savings">Picked up</Badge>;

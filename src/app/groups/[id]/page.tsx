@@ -4,10 +4,17 @@ import { getPageSession } from "@/server/page-session";
 import { providersFor } from "@/server/providers";
 import { getGroupView } from "@/server/services/read-service";
 
-export default async function GroupPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function GroupPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ invite?: string }>;
+}) {
   const current = await getPageSession();
   if (!current) redirect("/");
   const { id } = await params;
+  const { invite } = await searchParams;
   const group = await getGroupView(
     providersFor(current.session.mode),
     current.session,
@@ -15,5 +22,5 @@ export default async function GroupPage({ params }: { params: Promise<{ id: stri
     current.session.selectedShopperId,
   ).catch(() => null);
   if (!group) redirect("/shop");
-  return <GroupDetail initial={group} mode={current.view.mode} />;
+  return <GroupDetail initial={group} mode={current.view.mode} inviteCode={invite ?? null} />;
 }

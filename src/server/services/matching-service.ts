@@ -1,9 +1,11 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { DomainError } from "@/domain/errors";
 import { findProposals, MAX_OTHER_CANDIDATES } from "@/domain/matching";
+import { evaluateJoin, evaluateSlotJoin } from "@/domain/open-group";
 import type { MatchShopper } from "@/domain/types";
 import { RETAILER_LABELS } from "@/lib/format";
 import type { MatchView } from "@/lib/view-types";
+import { mapLimit } from "@/server/concurrency";
 import { getDb } from "@/server/db/client";
 import {
   type AnalyticsSnapshot,
@@ -13,18 +15,19 @@ import {
   offers,
   shoppers,
 } from "@/server/db/schema";
+import { databaseLabel } from "@/server/config";
 import type { Providers } from "@/server/providers";
 import { runtime } from "@/server/runtime";
+import { PROVIDER_READ_CONCURRENCY, spendable } from "@/server/services/balance-service";
 import type { ActionContext } from "@/server/services/funding-service";
+import { listJoinableGroups } from "@/server/services/group-builder-service";
 import { buildGroupView, loadBundleFor } from "@/server/services/group-view";
 import {
   appendGroupEvent,
-  enqueueGroup,
   toMatchNeed,
   toOfferSnapshot,
   toOfferTerms,
 } from "@/server/services/records";
-import { syncSession } from "@/server/services/sync-service";
 
 const MAX_PERSISTED_PROPOSALS = 3;
 
@@ -56,13 +59,11 @@ export async function runMatching(
     throw new DomainError("NEED_UNAVAILABLE", "This request is no longer open.");
   }
 
-  const sync = await syncSession(session.id, providers);
   const offerRows = await db
     .select()
     .from(offers)
     .where(and(eq(offers.sessionId, session.id), inArray(offers.id, need.acceptedOfferIds)));
 
-  const queryIds: string[] = [];
   const candidateVersions = new Map<string, number>();
   for (const offer of offerRows) {
     const result = await providers.analytics.queryCandidates({
@@ -74,7 +75,6 @@ export async function runMatching(
       pickupWindow: need.pickupWindow,
       limit: MAX_OTHER_CANDIDATES,
     });
-    if (result.queryId) queryIds.push(result.queryId);
     for (const row of result.rows) candidateVersions.set(row.needId, row.entityVersion);
   }
 
@@ -92,17 +92,17 @@ export async function runMatching(
   const shopperIds = [...new Set([need.shopperId, ...fresh.map((row) => row.shopperId)])];
   const shopperRows = await db.select().from(shoppers).where(inArray(shoppers.id, shopperIds));
   const shopperMap = new Map<string, MatchShopper>();
-  for (const shopper of shopperRows) {
-    const balance = shopper.fundingAccountRef
-      ? await providers.banking.getBalanceCents(shopper.fundingAccountRef)
-      : null;
+  const money = await mapLimit(shopperRows, PROVIDER_READ_CONCURRENCY, (shopper) =>
+    spendable(providers, session, shopper, need.pickupWindow),
+  );
+  shopperRows.forEach((shopper, index) => {
     shopperMap.set(shopper.id, {
       id: shopper.id,
       displayName: shopper.displayName,
       memberships: shopper.memberships,
-      availableCents: balance === null ? null : balance - shopper.bufferCents,
+      availableCents: money[index]?.spendableCents ?? null,
     });
-  }
+  });
 
   const result = findProposals({
     initiatingNeed: toMatchNeed(need),
@@ -114,10 +114,9 @@ export async function runMatching(
 
   const offerById = new Map(offerRows.map((row) => [row.id, row]));
   const snapshotBase = {
-    source: providers.analytics.name === "snowflake" ? ("snowflake" as const) : ("local" as const),
-    queryId: queryIds[0] ?? null,
+    source: databaseLabel(),
+    queryId: null,
     candidateCount: fresh.length,
-    syncedThroughOutboxId: sync.deliveredThroughId,
     queriedAt: runtime.now().toISOString(),
   };
 
@@ -147,7 +146,6 @@ export async function runMatching(
         })
         .where(eq(groups.id, group.id))
         .returning();
-      if (updated) await enqueueGroup(tx, updated, bundle.allocations);
     }
 
     const ids: string[] = [];
@@ -195,6 +193,7 @@ export async function runMatching(
             quantity: allocation.quantity,
             contributionCents: allocation.contributionCents,
             baselineCents: allocation.baselineCents,
+            baselineEstimated: allocation.baselineEstimated,
             savingsCents: allocation.savingsCents,
             state: "active" as const,
             createdAt: runtime.now(),
@@ -222,7 +221,6 @@ export async function runMatching(
           queryId: snapshot.queryId,
         },
       });
-      await enqueueGroup(tx, group, allocationRows);
       ids.push(groupId);
     }
     return ids;
@@ -239,7 +237,6 @@ export async function runMatching(
   let demand: MatchView["demand"] = [];
   try {
     const summary = await providers.analytics.demandSummary(session.id);
-    if (summary.queryId) queryIds.push(summary.queryId);
     const allOffers = await db.select().from(offers).where(eq(offers.sessionId, session.id));
     const labels = new Map(allOffers.map((row) => [row.id, row]));
     demand = summary.rows
@@ -256,9 +253,34 @@ export async function runMatching(
     demand = [];
   }
 
+  const openGroups = (
+    await listJoinableGroups(session, ctx.shopperId, {
+      offerIds: need.acceptedOfferIds,
+      pickupWindow: need.pickupWindow,
+    })
+  ).filter((group) => {
+    // Same domain rules the join itself enforces, with this shopper's real spendable money.
+    const offer = offerById.get(group.offer.id);
+    if (!offer) return false;
+    const terms = {
+      offer: toOfferTerms(offer),
+      quantity: need.quantity,
+      maxContributionCents: need.maxContributionCents,
+      availableCents: shopperMap.get(need.shopperId)?.availableCents ?? null,
+    };
+    if (group.joinSlot?.mode === "slot") {
+      return evaluateSlotJoin({ ...terms, slot: group.joinSlot }).ok;
+    }
+    const memberQuantities = group.allocations
+      .filter((row) => row.state === "active" || row.state === "picked_up")
+      .map((row) => row.quantity);
+    return evaluateJoin({ ...terms, memberQuantities }).ok;
+  });
+
   return {
     needId: need.id,
     groups: groupViews,
+    openGroups,
     exclusions: result.exclusions
       .filter((item) => item.reason !== "not_selected" && item.needId !== need.id)
       .map((item) => ({
@@ -277,11 +299,7 @@ export async function runMatching(
             minimumShareCents: item.minimumShareCents,
           })),
       ),
-    analytics: {
-      source: snapshotBase.source,
-      queryIds,
-      syncedThroughOutboxId: sync.deliveredThroughId,
-    },
+    analytics: { engine: snapshotBase.source },
     demand,
   };
 }

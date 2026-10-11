@@ -3,14 +3,18 @@ import type { GroupView, OperatorView } from "@/lib/view-types";
 import { getDb } from "@/server/db/client";
 import { groups, shoppers, workflowEvents } from "@/server/db/schema";
 import type { Providers } from "@/server/providers";
+import { effectiveBalanceCents } from "@/server/services/balance-service";
 import { buildGroupView, loadBundleFor, loadGroupBundle } from "@/server/services/group-view";
 import { getSessionView, type SessionRow } from "@/server/services/session-service";
-import { outboxStatus } from "@/server/services/sync-service";
 
-async function collectionBalance(providers: Providers, ref: string | null): Promise<number | null> {
+async function collectionBalance(
+  providers: Providers,
+  sessionId: string,
+  ref: string | null,
+): Promise<number | null> {
   if (!ref) return null;
   try {
-    return await providers.banking.getBalanceCents(ref);
+    return await effectiveBalanceCents(providers, sessionId, ref);
   } catch {
     return null;
   }
@@ -24,7 +28,7 @@ export async function getGroupView(
   viewerShopperId: string | null,
 ): Promise<GroupView> {
   const bundle = await loadGroupBundle(getDb(), session.id, groupId);
-  const balance = await collectionBalance(providers, bundle.group.collectionAccountRef);
+  const balance = await collectionBalance(providers, session.id, bundle.group.collectionAccountRef);
   const view = buildGroupView(session, bundle, viewerShopperId, balance);
   if (view.explanation && view.explanation.proposalVersion !== bundle.group.version) {
     view.explanation.stale = true;
@@ -72,7 +76,7 @@ export async function getOperatorView(
         session,
         bundle,
         session.selectedShopperId,
-        await collectionBalance(providers, group.collectionAccountRef),
+        await collectionBalance(providers, session.id, group.collectionAccountRef),
       ),
     );
   }
@@ -89,7 +93,7 @@ export async function getOperatorView(
     balances.push({
       shopperId: shopper.id,
       name: shopper.displayName,
-      balanceCents: await collectionBalance(providers, shopper.fundingAccountRef),
+      balanceCents: await collectionBalance(providers, session.id, shopper.fundingAccountRef),
     });
   }
   return {
@@ -104,7 +108,6 @@ export async function getOperatorView(
       payload: event.payload,
       createdAt: event.createdAt.toISOString(),
     })),
-    outbox: await outboxStatus(session.id),
     balances,
   };
 }

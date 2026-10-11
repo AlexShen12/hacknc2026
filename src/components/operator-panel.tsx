@@ -7,9 +7,10 @@ import { GroupStatusBadge, OperationStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { hasLeft } from "@/domain/types";
 import { announceRefresh, api, REFRESH_EVENT } from "@/lib/api-client";
 import { formatCents } from "@/lib/format";
-import type { GroupAction, OperatorView } from "@/lib/view-types";
+import type { GroupAction, OperatorView, SnapshotStatus } from "@/lib/view-types";
 
 const ACTION_LABEL: Record<GroupAction, string> = {
   confirm: "Confirm",
@@ -19,6 +20,7 @@ const ACTION_LABEL: Record<GroupAction, string> = {
   cancel: "Cancel group",
   purchase: "Purchase",
   pickup: "Pick up",
+  join: "Join",
 };
 
 /**
@@ -32,6 +34,8 @@ export function OperatorPanel() {
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
+  const [snapshots, setSnapshots] = useState<SnapshotStatus | null>(null);
+
   const load = useCallback(async () => {
     try {
       setView(await api<OperatorView>("/api/demo/operator"));
@@ -40,13 +44,41 @@ export function OperatorPanel() {
     }
   }, []);
 
+  const loadSnapshots = useCallback(async () => {
+    try {
+      setSnapshots(await api<SnapshotStatus>("/api/demo/snapshots"));
+    } catch (error) {
+      setSnapshots({
+        available: false,
+        reason: error instanceof Error ? error.message : "Neon status unavailable.",
+        database: "",
+        parentBranch: null,
+        snapshots: [],
+      });
+    }
+  }, []);
+
+  async function snapshot() {
+    setBusy("snapshot");
+    setMessage(null);
+    try {
+      await api("/api/demo/snapshots", { body: {} });
+      await loadSnapshots();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Snapshot failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   useEffect(() => {
     if (!open) return;
     void load();
+    void loadSnapshots();
     const listener = () => void load();
     window.addEventListener(REFRESH_EVENT, listener);
     return () => window.removeEventListener(REFRESH_EVENT, listener);
-  }, [open, load]);
+  }, [open, load, loadSnapshots]);
 
   async function run(key: string, body: Record<string, unknown>) {
     setBusy(key);
@@ -123,19 +155,7 @@ export function OperatorPanel() {
                 {session.providers.banking.correlationLookup ? "available" : "not verified"} ·
                 scenario {session.scenarioVersion} · catalog {session.catalogVersion}
               </p>
-              <p className="text-xs text-muted">
-                Analytics outbox: {view.outbox.delivered ?? 0} delivered, {view.outbox.pending ?? 0}{" "}
-                pending, {view.outbox.failed ?? 0} failed
-              </p>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy !== null}
-                  onClick={() => void run("sync", { action: "sync" })}
-                >
-                  Sync analytics now
-                </Button>
                 <Button
                   size="sm"
                   variant="secondary"
@@ -145,6 +165,40 @@ export function OperatorPanel() {
                   Reset demo (new session)
                 </Button>
               </div>
+            </section>
+
+            <section className="flex flex-col gap-2">
+              <h3 className="font-bold">Database</h3>
+              {!snapshots ? (
+                <p className="text-xs text-muted">Checking Neon…</p>
+              ) : snapshots.available ? (
+                <>
+                  <p className="text-xs text-muted">
+                    {snapshots.database} · branch <strong>{snapshots.parentBranch}</strong>. A snapshot
+                    copies the whole demo database to a new Neon branch (no compute) and leaves the live
+                    data untouched.
+                  </p>
+                  <div>
+                    <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void snapshot()}>
+                      {busy === "snapshot" ? "Creating branch…" : "Snapshot to Neon branch"}
+                    </Button>
+                  </div>
+                  {snapshots.snapshots.length > 0 ? (
+                    <ul className="flex flex-col gap-1 text-xs">
+                      {snapshots.snapshots.map((item) => (
+                        <li key={item.id} className="rounded-lg bg-sunken px-2 py-1">
+                          <span className="font-mono">{item.name}</span>{" "}
+                          <span className="text-muted">
+                            · {new Date(item.createdAt).toLocaleString("en-US", { timeZone: "America/New_York" })} ET
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-xs text-muted">Snapshots unavailable: {snapshots.reason}</p>
+              )}
             </section>
 
             {session.mode === "rehearsal" ? (
@@ -191,7 +245,11 @@ export function OperatorPanel() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-semibold">
                       {group.offer.retailerLabel} {group.offer.productName}{" "}
-                      <span className="text-xs text-muted">v{group.version}</span>
+                      <span className="text-xs text-muted">
+                        v{group.version} ·{" "}
+                        {group.origin === "organizer" ? "started by organizer" : "matched"}
+                        {group.autoPurchase ? " · auto-purchase" : ""}
+                      </span>
                     </p>
                     <GroupStatusBadge status={group.status} />
                   </div>
@@ -202,9 +260,7 @@ export function OperatorPanel() {
                       ? "—"
                       : formatCents(group.collectionBalanceCents)}{" "}
                     ·{" "}
-                    {group.analytics.source === "snowflake"
-                      ? `Snowflake query ${group.analytics.queryId}`
-                      : "local query"}
+                    matched on {group.analytics.engine}
                   </p>
                   <ul className="flex flex-col gap-1.5">
                     {group.allocations.map((row) => (
@@ -248,6 +304,45 @@ export function OperatorPanel() {
                       </li>
                     ))}
                   </ul>
+                  {group.joinSlot ? (
+                    <div className="flex flex-col gap-1.5 border-t border-line pt-2">
+                      <p className="text-xs text-muted">
+                        {group.joinSlot.mode === "slot"
+                          ? `Open share: ${group.joinSlot.quantity} ${group.offer.unit}`
+                          : `${group.remainingUnits} ${group.offer.unit} left`}
+                        {group.inviteCode
+                          ? ` · invite ${group.inviteCode} (${group.visibility})`
+                          : ""}
+                      </p>
+                      <span className="flex flex-wrap gap-1">
+                        {session.shoppers
+                          .filter(
+                            (shopper) =>
+                              !group.allocations.some(
+                                (row) => row.shopperId === shopper.id && !hasLeft(row.state),
+                              ),
+                          )
+                          .map((shopper) => (
+                            <Button
+                              key={shopper.id}
+                              size="sm"
+                              variant="secondary"
+                              disabled={busy !== null}
+                              onClick={() =>
+                                void run(`${group.id}-join-${shopper.id}`, {
+                                  action: "join",
+                                  actorShopperId: shopper.id,
+                                  groupId: group.id,
+                                  expectedVersion: group.version,
+                                })
+                              }
+                            >
+                              Join as {shopper.displayName}
+                            </Button>
+                          ))}
+                      </span>
+                    </div>
+                  ) : null}
                   {group.operations.some((op) => op.status !== "confirmed") ? (
                     <ul className="flex flex-col gap-1.5 border-t border-line pt-2">
                       {group.operations

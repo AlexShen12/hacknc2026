@@ -1,20 +1,29 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { DomainError } from "@/domain/errors";
 import { CANCELLABLE_STATUSES, readinessBlockers, WITHDRAWABLE_STATUSES } from "@/domain/funding";
-import { chooseOrganizer, isOfferOpen, rankReplacements } from "@/domain/matching";
-import { allocateByQuantity } from "@/domain/money";
+import { chooseOrganizer, rankReplacements } from "@/domain/matching";
+import { allocateByQuantity, formatCents } from "@/domain/money";
 import type { MatchShopper } from "@/domain/types";
+import { mapLimit } from "@/server/concurrency";
 import { getDb, type Tx } from "@/server/db/client";
 import { allocations, bankOperations, groups, needs, shoppers } from "@/server/db/schema";
 import type { Providers } from "@/server/providers";
 import { runtime } from "@/server/runtime";
+import {
+  effectiveBalanceCents,
+  PROVIDER_READ_CONCURRENCY,
+  spendable,
+  verifyProviderRecords,
+} from "@/server/services/balance-service";
 import {
   type ActionContext,
   advanceGroup,
   bumpGroupVersion,
   dispatchOperation,
   ensureCollectionAccount,
+  offerStillValid,
   prepareOperation,
+  releaseNeeds,
   setGroupStatus,
 } from "@/server/services/funding-service";
 import {
@@ -26,17 +35,17 @@ import {
   toFundingAllocations,
   vacantAllocations,
 } from "@/server/services/group-view";
+import { notify } from "@/server/services/notification-service";
 import {
   appendGroupEvent,
   assertVersion,
-  enqueueGroup,
-  enqueueNeed,
-  enqueueOperation,
+
+
   lockGroup,
   toMatchNeed,
   toOfferTerms,
 } from "@/server/services/records";
-import { syncSession } from "@/server/services/sync-service";
+import type { SessionRow } from "@/server/services/session-service";
 
 async function lockedBundle(tx: Tx, ctx: ActionContext, groupId: string, expectedVersion: number) {
   const group = await lockGroup(tx, ctx.session.id, groupId);
@@ -62,13 +71,6 @@ function requireOrganizer(bundle: GroupBundle, ctx: ActionContext) {
   );
   if (organizer === null && member) return;
   throw new DomainError("NOT_AUTHORIZED", "Only the group organizer can do that.");
-}
-
-function offerValid(bundle: GroupBundle): boolean {
-  return (
-    isOfferOpen(toOfferTerms(bundle.offer), runtime.now()) &&
-    bundle.offer.version === bundle.group.offerSnapshot.version
-  );
 }
 
 async function memberShoppers(tx: Tx, bundle: GroupBundle): Promise<Map<string, MatchShopper>> {
@@ -101,6 +103,7 @@ export async function confirmTerms(
   ctx: ActionContext,
   groupId: string,
   expectedVersion: number,
+  options: { autoPay?: boolean } = {},
 ) {
   const db = getDb();
   const outcome = await db.transaction(async (tx) => {
@@ -118,10 +121,10 @@ export async function confirmTerms(
     ) {
       throw new DomainError("INCOMPATIBLE_STATE", "These terms can no longer be confirmed.");
     }
-    if (!offerValid(bundle)) {
+    if (!offerStillValid(bundle)) {
       if (group.status === "awaiting_confirmation") {
+        await releaseNeeds(tx, group.id, "forming");
         await setGroupStatus(tx, bundle, "cancelled", "system", "offer_changed");
-        await enqueueGroup(tx, bundle.group, bundle.allocations);
         return { status: "cancelled" as const, changed: true, offerChanged: true };
       }
       throw new DomainError(
@@ -139,7 +142,9 @@ export async function confirmTerms(
     }
 
     if (group.status === "awaiting_confirmation") {
-      const firstConfirmation = bundle.allocations.every((row) => row.consent === null);
+      // Organizer-created groups reserve each need when its shopper joins.
+      const firstConfirmation =
+        group.origin === "matched" && bundle.allocations.every((row) => row.consent === null);
       if (firstConfirmation) {
         // Recalculate the same allocation from current Postgres records before reserving.
         const members = currentMembers(bundle.allocations);
@@ -160,7 +165,6 @@ export async function confirmTerms(
             member.contributionCents > need.maxContributionCents
           ) {
             await setGroupStatus(tx, bundle, "cancelled", "system", "stale_proposal");
-            await enqueueGroup(tx, bundle.group, bundle.allocations);
             return { status: "cancelled" as const, changed: true, stale: true };
           }
         }
@@ -188,7 +192,6 @@ export async function confirmTerms(
             "Someone in this proposal already joined another group.",
           );
         }
-        for (const need of reserved) await enqueueNeed(tx, need);
       } else if (ownNeed.reservedGroupId !== group.id) {
         throw new DomainError(
           "NEED_UNAVAILABLE",
@@ -209,7 +212,6 @@ export async function confirmTerms(
         .returning();
       if (!reserved)
         throw new DomainError("NEED_UNAVAILABLE", "Your request is no longer available.");
-      await enqueueNeed(tx, reserved);
     }
 
     await tx
@@ -224,6 +226,7 @@ export async function confirmTerms(
           pickupWindow: group.pickupWindow,
           consentedAt: runtime.now().toISOString(),
         },
+        autoPay: options.autoPay ?? allocation.autoPay,
         updatedAt: runtime.now(),
       })
       .where(eq(allocations.id, allocation.id));
@@ -275,7 +278,6 @@ export async function confirmTerms(
       await bumpGroupVersion(tx, next);
     }
     next = await loadBundleFor(tx, next.group);
-    await enqueueGroup(tx, next.group, next.allocations);
     return { status: next.group.status, changed: true };
   });
 
@@ -290,8 +292,102 @@ export async function confirmTerms(
   }
   if (outcome.status === "funding") {
     await ensureCollectionAccount(providers, ctx.session, groupId);
-    await advanceGroup(providers, ctx.session, groupId);
   }
+  // Always re-evaluate: a confirmed replacement may leave another slot to offer automatically.
+  if (outcome.changed) await advanceGroup(providers, ctx.session, groupId);
+}
+
+/**
+ * Hand the organizer role to the oldest remaining member eligible for the offer's (simulated)
+ * membership rule, or record that the group needs one. Returns the reloaded bundle.
+ */
+async function reassignOrganizer(tx: Tx, ctx: ActionContext, bundle: GroupBundle) {
+  const remaining = currentMembers(bundle.allocations);
+  const needRows = remaining.length
+    ? await tx
+        .select()
+        .from(needs)
+        .where(
+          inArray(
+            needs.id,
+            remaining.map((row) => row.needId),
+          ),
+        )
+    : [];
+  const organizer = chooseOrganizer(
+    needRows.map(toMatchNeed),
+    toOfferTerms(bundle.offer),
+    await memberShoppers(tx, bundle),
+    null,
+  );
+  await tx
+    .update(groups)
+    .set({ organizerShopperId: organizer })
+    .where(eq(groups.id, bundle.group.id));
+  await appendGroupEvent(tx, {
+    sessionId: ctx.session.id,
+    groupId: bundle.group.id,
+    actor: "system",
+    type: organizer ? "organizer_assigned" : "organizer_needed",
+    payload: { shopperId: organizer },
+  });
+  if (organizer) {
+    await notify(tx, {
+      sessionId: ctx.session.id,
+      shopperIds: [organizer],
+      groupId: bundle.group.id,
+      kind: "organizer_assigned",
+      message: `You're now the organizer of the ${bundle.group.offerSnapshot.productName} group.`,
+    });
+  }
+  return loadBundleFor(tx, { ...bundle.group, organizerShopperId: organizer });
+}
+
+/**
+ * Leaving an organizer-created group before it is full frees the units for someone else. The
+ * organizer role passes to the oldest eligible member; a group nobody remains in is cancelled.
+ */
+async function leaveFillingGroup(
+  tx: Tx,
+  ctx: ActionContext,
+  bundle: GroupBundle,
+  allocation: GroupBundle["allocations"][number],
+) {
+  const { group } = bundle;
+  // Released, not departed: before terms are frozen there is no fixed share to refill.
+  await tx
+    .update(allocations)
+    .set({ state: "released", departedAt: runtime.now(), updatedAt: runtime.now() })
+    .where(eq(allocations.id, allocation.id));
+  let next = await loadBundleFor(tx, group);
+  const remaining = currentMembers(next.allocations);
+  const name = bundle.shoppers.get(allocation.shopperId)?.displayName ?? "A member";
+  await appendGroupEvent(tx, {
+    sessionId: ctx.session.id,
+    groupId: group.id,
+    actor: ctx.actor,
+    type: "member_withdrew",
+    payload: { allocationId: allocation.id, funded: false, quantity: allocation.quantity },
+  });
+  await notify(tx, {
+    sessionId: ctx.session.id,
+    shopperIds: remaining.map((row) => row.shopperId),
+    groupId: group.id,
+    kind: "member_left",
+    message: `${name} left the ${group.offerSnapshot.productName} group; ${allocation.quantity} ${group.offerSnapshot.unit} are open again.`,
+  });
+  if (group.organizerShopperId === allocation.shopperId) {
+    next = await reassignOrganizer(tx, ctx, next);
+  }
+  if (remaining.length === 0 || !next.group.organizerShopperId) {
+    await releaseNeeds(tx, group.id, "forming");
+    await setGroupStatus(tx, next, "cancelled", ctx.actor, "organizer_left");
+  } else if (group.status === "awaiting_confirmation") {
+    await setGroupStatus(tx, next, "open", ctx.actor, "member_withdrew");
+  } else {
+    await bumpGroupVersion(tx, next);
+  }
+  next = await loadBundleFor(tx, next.group);
 }
 
 /**
@@ -328,24 +424,21 @@ export async function withdraw(
       })
       .where(eq(needs.id, allocation.needId))
       .returning();
-    if (withdrawn) await enqueueNeed(tx, withdrawn);
+
+    if (
+      group.origin === "organizer" &&
+      (group.status === "open" || group.status === "awaiting_confirmation")
+    ) {
+      await leaveFillingGroup(tx, ctx, bundle, allocation);
+      return;
+    }
 
     if (group.status === "awaiting_confirmation") {
       await tx
         .update(allocations)
         .set({ state: "departed", departedAt: runtime.now(), updatedAt: runtime.now() })
         .where(eq(allocations.id, allocation.id));
-      const released = await tx
-        .update(needs)
-        .set({
-          status: "forming",
-          reservedGroupId: null,
-          revision: sql`${needs.revision} + 1`,
-          updatedAt: runtime.now(),
-        })
-        .where(and(eq(needs.reservedGroupId, group.id), eq(needs.status, "reserved")))
-        .returning();
-      for (const need of released) await enqueueNeed(tx, need);
+      await releaseNeeds(tx, group.id, "forming");
       await appendGroupEvent(tx, {
         sessionId: ctx.session.id,
         groupId,
@@ -355,7 +448,6 @@ export async function withdraw(
       });
       await setGroupStatus(tx, bundle, "cancelled", ctx.actor, "member_withdrew_before_funding");
       const next = await loadBundleFor(tx, bundle.group);
-      await enqueueGroup(tx, next.group, next.allocations);
       return;
     }
 
@@ -374,7 +466,6 @@ export async function withdraw(
         .where(and(eq(bankOperations.id, contribution.id), eq(bankOperations.status, "prepared")))
         .returning();
       if (abandoned) {
-        await enqueueOperation(tx, abandoned);
         state = "departed";
       }
     } else if (contribution.status === "confirmed") {
@@ -414,36 +505,23 @@ export async function withdraw(
         returnRequired: contribution?.status === "confirmed",
       },
     });
+    const leaver = bundle.shoppers.get(allocation.shopperId)?.displayName ?? "A member";
+    await notify(tx, {
+      sessionId: ctx.session.id,
+      shopperIds: currentMembers(bundle.allocations)
+        .map((row) => row.shopperId)
+        .filter((id) => id !== allocation.shopperId),
+      groupId,
+      kind: "member_left",
+      message:
+        contribution?.status === "confirmed"
+          ? `${leaver} left the ${group.offerSnapshot.productName} group. Their contribution is being returned before anyone new pays; your price is unchanged.`
+          : `${leaver} left the ${group.offerSnapshot.productName} group; their share is open. Your price is unchanged.`,
+    });
 
     let next = await loadBundleFor(tx, bundle.group);
     if (group.organizerShopperId === ctx.shopperId) {
-      const remaining = currentMembers(next.allocations);
-      const needRows = remaining.length
-        ? await tx
-            .select()
-            .from(needs)
-            .where(
-              inArray(
-                needs.id,
-                remaining.map((row) => row.needId),
-              ),
-            )
-        : [];
-      const organizer = chooseOrganizer(
-        needRows.map(toMatchNeed),
-        toOfferTerms(next.offer),
-        await memberShoppers(tx, next),
-        null,
-      );
-      await tx.update(groups).set({ organizerShopperId: organizer }).where(eq(groups.id, groupId));
-      await appendGroupEvent(tx, {
-        sessionId: ctx.session.id,
-        groupId,
-        actor: "system",
-        type: organizer ? "organizer_assigned" : "organizer_needed",
-        payload: { shopperId: organizer },
-      });
-      next = await loadBundleFor(tx, { ...next.group, organizerShopperId: organizer });
+      next = await reassignOrganizer(tx, ctx, next);
     }
     const departing = next.allocations.some((row) => row.state === "departing");
     await setGroupStatus(
@@ -454,7 +532,6 @@ export async function withdraw(
       "member_withdrew",
     );
     next = await loadBundleFor(tx, next.group);
-    await enqueueGroup(tx, next.group, next.allocations);
   });
   await advanceGroup(providers, ctx.session, groupId);
 }
@@ -488,7 +565,6 @@ export async function findReplacement(
   const slot = pendingReplacement ?? vacantAllocations(bundle.allocations)[0];
   if (!slot) throw new DomainError("INCOMPATIBLE_STATE", "There is no open share to fill.");
 
-  await syncSession(ctx.session.id, providers);
   const query = await providers.analytics.queryCandidates({
     sessionId: ctx.session.id,
     offerId: bundle.offer.id,
@@ -525,17 +601,18 @@ export async function findReplacement(
         )
     : [];
   const shopperMap = new Map<string, MatchShopper>();
-  for (const shopper of candidateShoppers) {
-    const balance = shopper.fundingAccountRef
-      ? await providers.banking.getBalanceCents(shopper.fundingAccountRef)
-      : null;
+  const candidateMoney = await mapLimit(candidateShoppers, PROVIDER_READ_CONCURRENCY, (shopper) =>
+    spendable(providers, ctx.session, shopper, bundle.group.pickupWindow),
+  );
+  candidateShoppers.forEach((shopper, index) => {
     shopperMap.set(shopper.id, {
       id: shopper.id,
       displayName: shopper.displayName,
       memberships: shopper.memberships,
-      availableCents: balance === null ? null : balance - shopper.bufferCents,
+      availableCents: candidateMoney[index]?.spendableCents ?? null,
     });
-  }
+  });
+  const shopperNames = new Map(candidateShoppers.map((row) => [row.id, row.displayName]));
   const ranked = rankReplacements({
     slot: { quantity: slot.quantity, contributionCents: slot.contributionCents },
     offer: toOfferTerms(bundle.offer),
@@ -586,6 +663,7 @@ export async function findReplacement(
       quantity: slot.quantity,
       contributionCents: slot.contributionCents,
       baselineCents: choice.baselineCents,
+      baselineEstimated: choice.baselineEstimated,
       savingsCents: choice.savingsCents,
       state: "active",
       consent: null,
@@ -606,9 +684,24 @@ export async function findReplacement(
         queryId: query.queryId,
       },
     });
+    const product = locked.group.offerSnapshot.productName;
+    const share = `${slot.quantity} ${locked.group.offerSnapshot.unit} for ${formatCents(slot.contributionCents)}`;
+    await notify(tx, {
+      sessionId: ctx.session.id,
+      shopperIds: [choice.need.shopperId],
+      groupId,
+      kind: "replacement_offered",
+      message: `You've been offered a ${product} share: ${share} (save ${formatCents(choice.savingsCents)}). Confirm to join.`,
+    });
+    await notify(tx, {
+      sessionId: ctx.session.id,
+      shopperIds: currentMembers(locked.allocations).map((row) => row.shopperId),
+      groupId,
+      kind: "replacement_found",
+      message: `${shopperNames.get(choice.need.shopperId) ?? "A nearby shopper"} was offered the open ${product} share (${share}).`,
+    });
     await bumpGroupVersion(tx, locked);
     const next = await loadBundleFor(tx, locked.group);
-    await enqueueGroup(tx, next.group, next.allocations);
   });
   return { shopperId: choice.need.shopperId };
 }
@@ -646,26 +739,14 @@ export async function cancelGroup(
         })
         .where(and(eq(bankOperations.id, operation.id), eq(bankOperations.status, "prepared")))
         .returning();
-      if (abandoned) await enqueueOperation(tx, abandoned);
     }
     if (!anyMoney) {
-      const released = await tx
-        .update(needs)
-        .set({
-          status: "forming",
-          reservedGroupId: null,
-          revision: sql`${needs.revision} + 1`,
-          updatedAt: runtime.now(),
-        })
-        .where(and(eq(needs.reservedGroupId, groupId), eq(needs.status, "reserved")))
-        .returning();
-      for (const need of released) await enqueueNeed(tx, need);
+      await releaseNeeds(tx, groupId, "forming");
       await setGroupStatus(tx, bundle, "cancelled", ctx.actor, reason);
     } else {
       await setGroupStatus(tx, bundle, "cancelling", ctx.actor, reason);
     }
     const next = await loadBundleFor(tx, bundle.group);
-    await enqueueGroup(tx, next.group, next.allocations);
   });
   await advanceGroup(providers, ctx.session, groupId);
 }
@@ -680,34 +761,58 @@ export async function purchase(
   groupId: string,
   expectedVersion: number,
 ) {
-  const db = getDb();
-  const preview = await loadGroupBundle(db, ctx.session.id, groupId);
+  const preview = await loadGroupBundle(getDb(), ctx.session.id, groupId);
   assertVersion(preview.group, expectedVersion);
   requireOrganizer(preview, ctx);
+  await executePurchase(providers, ctx.session, groupId, ctx.actor, expectedVersion);
+}
+
+/**
+ * Purchase core shared by the organizer action and pre-authorized auto-purchase (null version).
+ * Readiness, offer validity and provider records are re-checked here either way.
+ */
+export async function executePurchase(
+  providers: Providers,
+  session: SessionRow,
+  groupId: string,
+  actor: string,
+  expectedVersion: number | null,
+) {
+  const db = getDb();
+  const preview = await loadGroupBundle(db, session.id, groupId);
+  if (expectedVersion !== null) assertVersion(preview.group, expectedVersion);
   if (preview.group.status !== "ready_to_purchase") {
     throw new DomainError("INCOMPATIBLE_STATE", "This group is not ready to purchase.");
   }
   if (!preview.group.collectionAccountRef) throw new Error("Collection account missing");
-  const balance = await providers.banking.getBalanceCents(preview.group.collectionAccountRef);
-  const merchantRef = ctx.session.merchantRefs[preview.offer.retailer];
-  if (!merchantRef)
+  const balance = await effectiveBalanceCents(
+    providers,
+    session.id,
+    preview.group.collectionAccountRef,
+  );
+  const records = await verifyProviderRecords(providers, preview.operations);
+  const merchantRef = session.merchantRefs[preview.offer.retailer];
+  if (!merchantRef) {
     throw new DomainError("UPSTREAM_UNAVAILABLE", "Merchant account is not set up.");
+  }
 
   const result = await db.transaction(async (tx) => {
-    const bundle = await lockedBundle(tx, ctx, groupId, expectedVersion);
+    const group = await lockGroup(tx, session.id, groupId);
+    if (expectedVersion !== null) assertVersion(group, expectedVersion);
+    const bundle = await loadBundleFor(tx, group);
     if (bundle.group.status !== "ready_to_purchase") {
       throw new DomainError("INCOMPATIBLE_STATE", "This group is not ready to purchase.");
     }
-    if (!offerValid(bundle)) {
-      await setGroupStatus(tx, bundle, "cancelling", ctx.actor, "offer_changed");
+    if (!offerStillValid(bundle)) {
+      await setGroupStatus(tx, bundle, "cancelling", actor, "offer_changed");
       const next = await loadBundleFor(tx, bundle.group);
-      await enqueueGroup(tx, next.group, next.allocations);
       return { offerChanged: true as const };
     }
     const blockers = readinessBlockers({
       allocations: toFundingAllocations(bundle),
       totalCents: bundle.group.totalCents,
       collectionBalanceCents: balance,
+      providerRecordsVerified: records.ok,
     });
     if (blockers.length > 0) {
       throw new DomainError("INCOMPATIBLE_STATE", "Funds are not fully reconciled yet.", {
@@ -715,7 +820,7 @@ export async function purchase(
       });
     }
     const operation = await prepareOperation(tx, {
-      sessionId: ctx.session.id,
+      sessionId: session.id,
       groupId,
       allocationId: null,
       kind: "purchase",
@@ -734,23 +839,21 @@ export async function purchase(
         })
         .where(and(eq(bankOperations.id, operation.id), eq(bankOperations.status, "failed")))
         .returning();
-      if (retried) await enqueueOperation(tx, retried);
     }
-    await setGroupStatus(tx, bundle, "purchasing", ctx.actor);
+    await setGroupStatus(tx, bundle, "purchasing", actor);
     const next = await loadBundleFor(tx, bundle.group);
-    await enqueueGroup(tx, next.group, next.allocations);
     return { operationId: operation.id };
   });
 
   if ("offerChanged" in result) {
-    await advanceGroup(providers, ctx.session, groupId);
+    await advanceGroup(providers, session, groupId);
     throw new DomainError(
       "OFFER_CHANGED",
       "The offer changed before purchase, so the group is cancelling and returning contributions.",
     );
   }
   await dispatchOperation(providers, result.operationId);
-  await advanceGroup(providers, ctx.session, groupId);
+  await advanceGroup(providers, session, groupId);
 }
 
 export async function confirmPickup(

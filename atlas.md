@@ -26,6 +26,8 @@ The first audience is students and nearby households. The 24-hour demo supports 
 | Group detail | Inspect allocation and confirm personal terms | Revalidate the proposal, reserve needs, record per-person consent |
 | Funding and changes | Contribute, inspect status or withdraw before purchase | Track operations, reconcile funds, return a contribution and refill its slot |
 | Pickup summary | See purchased shares and mark pickup | Record pickup per allocation; mark fulfilled after all shares are collected |
+| Wallet | See balance, upcoming bills, what is safe to contribute and verified history | Read the Nessie account and bills, derive spendable money, re-read each record from the bank |
+| Insights | See community savings, demand and outcomes | Synchronize, run Snowflake SQL (local queries in rehearsal), summarize with Cortex under validation |
 
 Use warm neutral surfaces, green savings accents, readable cards and keyboard-accessible dialogs. Show amount, quantity, data source and next action together. A visible demo label explains simulated shopping/banking; an operator panel exposes provider mode and scenario controls without filling consumer screens with infrastructure details.
 

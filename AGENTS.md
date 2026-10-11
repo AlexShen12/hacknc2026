@@ -4,8 +4,8 @@
 - Read [PROJECT_BRIEF.md](PROJECT_BRIEF.md) for the product and agreed MVP.
 - Read [atlas.md](atlas.md) for boundaries and data flow, then [implementation.md](implementation.md) for the next milestone.
 - Follow [conventions.md](conventions.md); use [techContext.md](techContext.md) for dependency pins, configuration and API references.
-- Current state: the application is scaffolded and the full journey works in **rehearsal** mode locally (see the status section in [implementation.md](implementation.md)). Sponsor adapters (Nessie, Snowflake SQL, Cortex) are implemented against public documentation but **unverified**; nothing is deployed to Vercel/Neon yet.
-- Local database: `docker compose up -d` starts Postgres 18 with `commoncart` and `commoncart_test` databases; copy `.env.example` to `.env`, then `npm run db:migrate`.
+- Current state: the full journey works in **rehearsal** mode, and its banking runs on **live Nessie** (verified October 10, 2026; Nessie records transactions but never moves balances, so balances are derived from confirmed records). Snowflake SQL/Cortex are blocked by a PAT network-policy error. The app database is Neon (migrated); nothing is deployed to Vercel yet. See [implementation.md](implementation.md#implementation-status).
+- Databases: `DATABASE_URL` points at Neon; `docker compose up -d` provides the local Postgres 18 `commoncart_test` database used by integration and e2e tests. Apply new migrations with `npm run db:migrate` (loads `.env`). Migrations are incremental from `0001` on; never regenerate `0000`.
 
 ## Scope and boundaries
 - Build the agreed 24-hour, hosted, needs-first demo with seeded personas and a friendly shopping-club UI.

@@ -5,21 +5,26 @@ import {
   CircleAlert,
   HandCoins,
   LogOut,
+  MapPin,
   PackageCheck,
   ShoppingCart,
   UserSearch,
+  Users,
   XCircle,
 } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { AllocationTable } from "@/components/allocation-table";
+import { CollectionLedger } from "@/components/collection-ledger";
 import { ExplanationCard } from "@/components/explanation-card";
+import { AutomationCard, InviteCard, JoinCard } from "@/components/group-panels";
 import { GroupStatusBadge, OperationStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, SectionTitle } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
-import type { ProviderMode } from "@/domain/types";
+import type { OperationKind, ProviderMode } from "@/domain/types";
+import { hasLeft } from "@/domain/types";
 import { ApiError, announceRefresh, api, REFRESH_EVENT } from "@/lib/api-client";
 import { formatCents } from "@/lib/format";
 import type { GroupAction, GroupView } from "@/lib/view-types";
@@ -42,18 +47,31 @@ const BLOCKER_TEXT: Record<string, string> = {
   return_failed: "A return transfer failed. Purchase stays blocked until it succeeds.",
   vacant_share:
     "A share is open. Find a replacement for exactly the same amount, or cancel the group.",
+  provider_record_mismatch:
+    "A bank record no longer matches what we recorded. Purchase is blocked until it is checked.",
   awaiting_replacement_consent:
     "A replacement has been offered the open share and needs to confirm.",
 };
 
-const KIND_LABEL = {
+const KIND_LABEL: Record<OperationKind, string> = {
+  deposit: "Wallet top-up",
+  bill_payment: "Bill payment",
   contribution: "Contribution",
   return: "Return",
   purchase: "Merchant purchase",
 };
 
-export function GroupDetail({ initial, mode }: { initial: GroupView; mode: ProviderMode }) {
+export function GroupDetail({
+  initial,
+  mode,
+  inviteCode,
+}: {
+  initial: GroupView;
+  mode: ProviderMode;
+  inviteCode: string | null;
+}) {
   const [group, setGroup] = useState(initial);
+  const [confirmAutoPay, setConfirmAutoPay] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: "error" | "info"; text: string } | null>(null);
   const [dialog, setDialog] = useState<"confirm" | "withdraw" | "cancel" | null>(null);
@@ -81,13 +99,13 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
     return () => window.clearInterval(timer);
   }, [unresolved, refresh]);
 
-  async function act(action: GroupAction) {
+  async function act(action: GroupAction, extra: Record<string, unknown> = {}) {
     setBusy(action);
     setNotice(null);
     try {
       const data = await api<GroupView | { group: GroupView; operationStatus: string }>(
         `/api/groups/${group.id}/${action}`,
-        { body: { expectedVersion: group.version } },
+        { body: { expectedVersion: group.version, ...extra } },
       );
       const next = "group" in data ? data.group : data;
       setGroup(next);
@@ -116,11 +134,11 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
   async function reconcile(operationId: string) {
     setBusy(operationId);
     try {
-      const data = await api<{ group: GroupView; operationStatus: string }>(
+      const data = await api<{ group: GroupView | null; operationStatus: string }>(
         `/api/operations/${operationId}/reconcile`,
         { body: {} },
       );
-      setGroup(data.group);
+      if (data.group) setGroup(data.group);
       setNotice({
         tone: "info",
         text:
@@ -137,7 +155,7 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
   }
 
   const mine = group.allocations.find(
-    (row) => row.shopperId === group.viewer.shopperId && row.state !== "departed",
+    (row) => row.shopperId === group.viewer.shopperId && !hasLeft(row.state),
   );
   const actions = new Set(group.viewer.actions);
   const progress = Math.min(100, Math.round((group.retainedCents / group.totalCents) * 100));
@@ -166,6 +184,24 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
               Pickup {group.pickupLabel} at {group.pickupZoneLabel} · Organizer{" "}
               {group.organizerName ?? "needed"}
             </p>
+            {group.store ? (
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted">
+                <MapPin size={14} aria-hidden className="text-savings" />
+                Bought at <strong className="text-ink">{group.store.name}</strong> ·{" "}
+                {group.store.addressLine} ·{" "}
+                <a
+                  href={group.store.mapUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-savings hover:underline"
+                >
+                  Map
+                </a>
+                {group.store.merchantRef && mode === "sponsor" ? (
+                  <span className="text-xs">· Nessie merchant {group.store.merchantRef.slice(0, 8)}…</span>
+                ) : null}
+              </p>
+            ) : null}
           </div>
           {mine ? (
             <div className="w-full rounded-xl bg-savings-soft px-4 py-3 sm:w-auto sm:text-right">
@@ -183,12 +219,13 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
         {group.statusReason ? (
           <p className="text-sm text-muted">Reason: {group.statusReason.replaceAll("_", " ")}</p>
         ) : null}
-        <ExplanationCard
-          groupId={group.id}
-          initial={group.explanation}
-          analyticsSource={group.analytics.source}
-          key={group.explanation?.proposalVersion ?? "none"}
-        />
+        {group.status !== "open" ? (
+          <ExplanationCard
+            groupId={group.id}
+            initial={group.explanation}
+            key={group.explanation?.proposalVersion ?? "none"}
+          />
+        ) : null}
       </Card>
 
       {notice ? (
@@ -204,7 +241,46 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
         </div>
       ) : null}
 
-      {group.viewer.actions.length > 0 ? (
+      {group.status === "open" ? (
+        <Card className="flex flex-col gap-3">
+          <SectionTitle className="flex items-center gap-2">
+            <Users size={20} aria-hidden /> Filling the package
+          </SectionTitle>
+          <div
+            className="h-3 overflow-hidden rounded-full bg-sunken"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={group.offer.packageQuantity}
+            aria-valuenow={group.offer.packageQuantity - group.remainingUnits}
+            aria-label="Units claimed"
+          >
+            <div
+              className="h-full rounded-full bg-savings transition-all"
+              style={{
+                width: `${Math.round(((group.offer.packageQuantity - group.remainingUnits) / group.offer.packageQuantity) * 100)}%`,
+              }}
+            />
+          </div>
+          <p className="text-sm">
+            <strong>
+              {group.offer.packageQuantity - group.remainingUnits} of {group.offer.packageQuantity}{" "}
+              {group.offer.unit}
+            </strong>{" "}
+            claimed · {group.remainingUnits} left ·{" "}
+            {group.visibility === "public" ? "listed for nearby shoppers" : "invite only"}
+          </p>
+          {mine ? <InviteCard group={group} /> : null}
+          <p className="text-xs text-muted">
+            Nobody is charged until the package is exactly full. Shares are priced by quantity.
+          </p>
+        </Card>
+      ) : null}
+
+      {actions.has("join") ? (
+        <JoinCard group={group} inviteCode={inviteCode} onUpdated={setGroup} key={group.version} />
+      ) : null}
+
+      {group.viewer.actions.some((action) => action !== "join") ? (
         <Card className="flex flex-col gap-3">
           <SectionTitle>Next step</SectionTitle>
           <div className="flex flex-wrap gap-2">
@@ -242,7 +318,11 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
                 disabled={busy !== null}
               >
                 <UserSearch size={18} aria-hidden />
-                {busy === "replace" ? "Searching…" : "Find a replacement"}
+                {busy === "replace"
+                  ? "Searching…"
+                  : group.blockers.includes("awaiting_replacement_consent")
+                    ? "Offer to someone else"
+                    : "Find a replacement"}
               </Button>
             ) : null}
             {actions.has("withdraw") ? (
@@ -262,6 +342,8 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
           </div>
         </Card>
       ) : null}
+
+      <AutomationCard group={group} onUpdated={setGroup} />
 
       {group.blockers.length > 0 &&
       !["fulfilled", "cancelled", "purchased"].includes(group.status) ? (
@@ -312,6 +394,8 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
         </div>
         <AllocationTable group={group} showFunding />
       </Card>
+
+      {group.operations.length > 0 ? <CollectionLedger groupId={group.id} /> : null}
 
       {group.operations.length > 0 ? (
         <Card className="flex flex-col gap-3">
@@ -379,12 +463,31 @@ export function GroupDetail({ initial, mode }: { initial: GroupView; mode: Provi
             <dt className="text-muted">Pickup</dt>
             <dd>{group.pickupLabel}</dd>
           </dl>
+          <label className="mb-5 flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={confirmAutoPay}
+              onChange={(event) => setConfirmAutoPay(event.target.checked)}
+            />
+            <span>
+              <strong>Pay automatically</strong> once everyone has confirmed, so you don&apos;t need
+              to come back.
+            </span>
+          </label>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setDialog(null)}>
               Not now
             </Button>
-            <Button onClick={() => void act("confirm")} disabled={busy !== null}>
-              {busy === "confirm" ? "Confirming…" : "Confirm my share"}
+            <Button
+              onClick={() => void act("confirm", { autoPay: confirmAutoPay })}
+              disabled={busy !== null}
+            >
+              {busy === "confirm"
+                ? "Confirming…"
+                : confirmAutoPay
+                  ? "Confirm and pay automatically"
+                  : "Confirm my share"}
             </Button>
           </div>
         </Dialog>

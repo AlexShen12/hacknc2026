@@ -1,10 +1,18 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { DomainError } from "@/domain/errors";
 import { type FundingAllocation, readinessBlockers, totalRetainedCents } from "@/domain/funding";
+import { hasLeft, type Retailer } from "@/domain/types";
 import { formatPickupWindow } from "@/lib/format";
-import type { AllocationView, GroupAction, GroupView, OperationView } from "@/lib/view-types";
+import type {
+  AllocationView,
+  GroupAction,
+  GroupView,
+  OperationView,
+  StoreView,
+} from "@/lib/view-types";
 import type { DbOrTx } from "@/server/db/client";
 import { allocations, bankOperations, groups, offers, shoppers } from "@/server/db/schema";
+import { loadCatalog } from "@/server/fixtures";
 import { toOfferView } from "@/server/services/need-service";
 import type {
   AllocationRow,
@@ -93,13 +101,36 @@ export function currentMembers(rows: AllocationRow[]): AllocationRow[] {
   return rows.filter((row) => row.state === "active" || row.state === "picked_up");
 }
 
+export type JoinSlot =
+  | { mode: "open" }
+  | { mode: "slot"; allocationId: string; quantity: number; contributionCents: number };
+
+/** What a non-member could join right now: any fitting quantity, or exactly a vacated share. */
+export function joinSlotFor(bundle: GroupBundle): JoinSlot | null {
+  const { group } = bundle;
+  if (group.origin !== "organizer") return null;
+  if (group.status === "open") return { mode: "open" };
+  if (group.status === "replacement_needed" && !hasPendingReplacement(bundle)) {
+    const vacancy = vacantAllocations(bundle.allocations)[0];
+    if (vacancy) {
+      return {
+        mode: "slot",
+        allocationId: vacancy.id,
+        quantity: vacancy.quantity,
+        contributionCents: vacancy.contributionCents,
+      };
+    }
+  }
+  return null;
+}
+
 export function actionsFor(bundle: GroupBundle, shopperId: string | null): GroupAction[] {
   if (!shopperId) return [];
   const { group } = bundle;
   const allocation = bundle.allocations.find(
     (row) => row.shopperId === shopperId && (row.state === "active" || row.state === "picked_up"),
   );
-  if (!allocation) return [];
+  if (!allocation) return joinSlotFor(bundle) ? ["join"] : [];
   const isOrganizer =
     group.organizerShopperId === shopperId ||
     (group.organizerShopperId === null && allocation.consent !== null);
@@ -108,6 +139,10 @@ export function actionsFor(bundle: GroupBundle, shopperId: string | null): Group
   const actions: GroupAction[] = [];
 
   switch (group.status) {
+    case "open":
+      actions.push("withdraw");
+      if (isOrganizer) actions.push("cancel");
+      break;
     case "awaiting_confirmation":
       if (!consented) actions.push("confirm");
       actions.push("withdraw");
@@ -220,18 +255,20 @@ export function buildGroupView(
       quantity: allocation.quantity,
       contributionCents: allocation.contributionCents,
       baselineCents: allocation.baselineCents,
+      baselineEstimated: allocation.baselineEstimated,
       savingsCents: allocation.savingsCents,
       state: allocation.state,
       consented: allocation.consent !== null,
       isReplacement: allocation.replacesAllocationId !== null,
       isOrganizer: allocation.shopperId === group.organizerShopperId,
+      autoPay: allocation.autoPay,
       contributionStatus: funding[index]?.contributionStatus ?? null,
       returnStatus: funding[index]?.returnStatus ?? null,
       netContributionCents: net,
     };
   });
   const viewerAllocation = bundle.allocations.find(
-    (row) => row.shopperId === viewerShopperId && row.state !== "departed",
+    (row) => row.shopperId === viewerShopperId && !hasLeft(row.state),
   );
   const members = currentMembers(bundle.allocations);
   const memberActions: Record<string, GroupAction[]> = {};
@@ -239,8 +276,25 @@ export function buildGroupView(
     memberActions[allocation.shopperId] = actionsFor(bundle, allocation.shopperId);
   }
   const explanation = group.explanation;
+  const slot = joinSlotFor(bundle);
   return {
     id: group.id,
+    store: storeFor(session, bundle.offer.retailer),
+    origin: group.origin,
+    visibility: group.visibility,
+    // Only members see the invite code; otherwise "invite only" could be bypassed from the view.
+    inviteCode:
+      group.origin === "organizer" && members.some((member) => member.shopperId === viewerShopperId)
+        ? group.inviteCode
+        : null,
+    autoPurchase: group.autoPurchase,
+    autoReplace: group.autoReplace,
+    remainingUnits:
+      group.packageQuantity - members.reduce((sum, member) => sum + member.quantity, 0),
+    joinSlot:
+      slot?.mode === "slot"
+        ? { mode: "slot", quantity: slot.quantity, contributionCents: slot.contributionCents }
+        : slot,
     status: group.status,
     statusReason: group.statusReason,
     version: group.version,
@@ -276,8 +330,7 @@ export function buildGroupView(
         }
       : null,
     analytics: {
-      source: group.analyticsSnapshot.source,
-      queryId: group.analyticsSnapshot.queryId,
+      engine: group.analyticsSnapshot.source,
       candidateCount: group.analyticsSnapshot.candidateCount,
     },
     exclusions: group.analyticsSnapshot.exclusions
@@ -287,5 +340,18 @@ export function buildGroupView(
         reason: item.reason,
       })),
     updatedAt: group.updatedAt.toISOString(),
+  };
+}
+
+/** The retailer's (fictional) store, as provisioned as a bank merchant for this session. */
+export function storeFor(session: SessionRow, retailer: Retailer): StoreView | null {
+  const store = loadCatalog().stores[retailer];
+  if (!store) return null;
+  const { address, geocode } = store;
+  return {
+    name: store.name,
+    addressLine: `${address.streetNumber} ${address.streetName}, ${address.city}, ${address.state} ${address.zip}`,
+    mapUrl: `https://www.openstreetmap.org/?mlat=${geocode.lat}&mlon=${geocode.lng}#map=16/${geocode.lat}/${geocode.lng}`,
+    merchantRef: session.merchantRefs[retailer] ?? null,
   };
 }

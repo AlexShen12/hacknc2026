@@ -10,12 +10,14 @@ import {
   RotateCcw,
   ShoppingBag,
   UserSearch,
+  Users,
 } from "lucide-react";
 import { Badge, type Tone } from "@/components/ui/badge";
 import type { GroupStatus, OperationStatus } from "@/domain/types";
 import { GROUP_STATUS_LABELS, OPERATION_STATUS_LABELS } from "@/lib/format";
 
 const GROUP_TONES: Record<GroupStatus, { tone: Tone; Icon: typeof Clock }> = {
+  open: { tone: "info", Icon: Users },
   awaiting_confirmation: { tone: "info", Icon: Clock },
   funding: { tone: "info", Icon: Loader },
   returning_contribution: { tone: "warn", Icon: RotateCcw },

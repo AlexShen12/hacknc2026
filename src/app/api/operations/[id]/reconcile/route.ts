@@ -11,12 +11,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { id } = await params;
     const providers = providersFor(session.mode);
     const operation = await reconcileOperation(providers, session, id);
-    const group = await getGroupView(
-      providers,
-      session,
-      operation.groupId,
-      session.selectedShopperId,
-    );
+    // Wallet operations (top-ups, bill payments) belong to no group.
+    const group = operation.groupId
+      ? await getGroupView(providers, session, operation.groupId, session.selectedShopperId)
+      : null;
     const settled = operation.status === "confirmed" || operation.status === "failed";
     return json(
       { group, operationId: operation.id, operationStatus: operation.status },

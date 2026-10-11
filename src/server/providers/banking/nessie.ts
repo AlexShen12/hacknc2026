@@ -4,16 +4,20 @@ import type { NessieConfig } from "@/server/config";
 import { log, redact } from "@/server/observability/logger";
 import type {
   BankingProvider,
+  BillPaymentInput,
+  DepositInput,
   ObservedOutcome,
   PurchaseInput,
+  RecordKind,
+  StoreLocation,
   SubmitOutcome,
   TransferInput,
 } from "@/server/providers/banking/types";
 import { PROVIDER_TIMEOUT_MS, ProviderError, withRetries } from "@/server/providers/errors";
 
 /**
- * Paths from the public Nessie documentation (see techContext.md). UNVERIFIED until
- * `npm run verify:sponsors` records authenticated evidence; keep every path in this table.
+ * Paths observed working against prod-api.nessieisreal.com on 2026-10-10 (see techContext.md).
+ * Note the singular `/purchase/{id}` read path; the plural form returns 403.
  */
 export const NESSIE_PATHS = {
   customers: () => "/customers",
@@ -23,29 +27,62 @@ export const NESSIE_PATHS = {
   transfer: (transferId: string) => `/transfers/${encodeURIComponent(transferId)}`,
   merchants: () => "/merchants",
   accountPurchases: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/purchases`,
+  accountBills: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/bills`,
+  accountDeposits: (accountId: string) => `/accounts/${encodeURIComponent(accountId)}/deposits`,
+  // Observed: withdrawals are listed per account, but GET /withdrawals/{id} returns 403.
+  accountWithdrawals: (accountId: string) =>
+    `/accounts/${encodeURIComponent(accountId)}/withdrawals`,
   purchase: (purchaseId: string) => `/purchase/${encodeURIComponent(purchaseId)}`,
+  deposit: (depositId: string) => `/deposits/${encodeURIComponent(depositId)}`,
+  bill: (billId: string) => `/bills/${encodeURIComponent(billId)}`,
+  merchant: (merchantId: string) => `/merchants/${encodeURIComponent(merchantId)}`,
+  merchantPurchases: (merchantId: string) =>
+    `/merchants/${encodeURIComponent(merchantId)}/purchases`,
+};
+
+/** Where each record kind is listed for an account (for correlation lookup and withdrawals). */
+const LIST_PATH: Record<RecordKind, (accountId: string) => string> = {
+  transfer: NESSIE_PATHS.accountTransfers,
+  purchase: NESSIE_PATHS.accountPurchases,
+  deposit: NESSIE_PATHS.accountDeposits,
+  withdrawal: NESSIE_PATHS.accountWithdrawals,
 };
 
 /**
- * ASSUMPTION (unverified): Nessie amounts are decimal dollars. All conversion lives here.
+ * Observed 2026-10-10: Nessie stores integer amounts (10.5 was stored as 10) and applies no balance
+ * effects, so the unit is CommonCart's convention. We record integer cents so every share is exact,
+ * and put the formatted dollar amount in each description for readability.
  */
 export function centsToNessieAmount(cents: number): number {
   if (!Number.isSafeInteger(cents) || cents < 0) throw new Error("Invalid cents");
-  return cents / 100;
-}
-
-export function nessieAmountToCents(amount: unknown): number {
-  if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
-    throw new ProviderError("nessie", "Invalid amount in Nessie response");
-  }
-  const cents = Math.round(amount * 100);
-  if (Math.abs(cents - amount * 100) > 1e-6) {
-    throw new ProviderError("nessie", "Nessie amount has sub-cent precision");
-  }
   return cents;
 }
 
-/** Map documented transaction statuses; anything unrecognized stays unresolved, never confirmed. */
+export function nessieAmountToCents(amount: unknown): number {
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) {
+    throw new ProviderError("nessie", "Invalid amount in Nessie response");
+  }
+  return amount;
+}
+
+const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+
+/** Description stored with each record: correlation first, so lookups can match its prefix. */
+export function nessieDescription(correlation: string, amountCents: number, toRef: string): string {
+  return `${correlation} | to:${toRef} | ${dollars.format(amountCents / 100)}`;
+}
+
+export function matchesCorrelation(description: unknown, correlation: string): boolean {
+  return (
+    typeof description === "string" &&
+    (description === correlation || description.startsWith(`${correlation} | `))
+  );
+}
+
+/**
+ * Map statuses; anything unrecognized stays unresolved, never confirmed. Observed: Nessie stores
+ * whatever status the client sends (it does not validate or advance it).
+ */
 export function normalizeNessieStatus(status: unknown): "pending" | "confirmed" | "failed" {
   const value = typeof status === "string" ? status.toLowerCase() : "";
   if (value === "executed" || value === "completed") return "confirmed";
@@ -56,8 +93,32 @@ export function normalizeNessieStatus(status: unknown): "pending" | "confirmed" 
 const createdSchema = z.object({
   objectCreated: z.looseObject({ _id: z.string().min(1), status: z.string().optional() }),
 });
-const transactionSchema = z.looseObject({ _id: z.string().min(1), status: z.string().optional() });
-const accountSchema = z.looseObject({ _id: z.string(), balance: z.number() });
+// GET /transfers/{id} returns `id`; GET /purchase/{id} and list endpoints return `_id`.
+const transactionSchema = z
+  .looseObject({
+    _id: z.string().min(1).optional(),
+    id: z.string().min(1).optional(),
+    status: z.string().optional(),
+    amount: z.number().optional(),
+    description: z.string().optional(),
+  })
+  .refine((value) => value._id ?? value.id, { message: "missing id" });
+const accountSchema = z.looseObject({
+  _id: z.string(),
+  balance: z.number(),
+  nickname: z.string().optional(),
+  account_number: z.string().optional(),
+});
+// Observed 2026-10-10: status, payee and payment_amount are required; reads include
+// upcoming_payment_date. An account without bills lists as [].
+const billSchema = z.looseObject({
+  _id: z.string(),
+  status: z.string(),
+  payee: z.string(),
+  payment_amount: z.number(),
+  payment_date: z.string().optional(),
+  upcoming_payment_date: z.string().optional(),
+});
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -66,9 +127,12 @@ function today(): string {
 export class NessieBankingProvider implements BankingProvider {
   readonly name = "nessie" as const;
   readonly capabilities = {
-    correlationLookup: false,
-    amountUnit: "decimal dollars (assumed; unverified)",
-    verified: false,
+    correlationLookup: true,
+    // A record can be found by listing, but its absence is not proof it was never stored.
+    correlationAbsenceIsProof: false,
+    amountUnit: "integer cents (CommonCart convention; Nessie stores integers only)",
+    verified: true,
+    balanceEffects: false,
   };
 
   constructor(
@@ -81,7 +145,7 @@ export class NessieBankingProvider implements BankingProvider {
   }
 
   private async request(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT",
     path: string,
     body?: unknown,
   ): Promise<{ status: number; json: unknown }> {
@@ -109,7 +173,11 @@ export class NessieBankingProvider implements BankingProvider {
   }
 
   /** Reads and setup writes throw ProviderError; setup has no money at stake. */
-  private async call(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
+  private async call(
+    method: "GET" | "POST" | "PUT",
+    path: string,
+    body?: unknown,
+  ): Promise<unknown> {
     let result: { status: number; json: unknown };
     try {
       result = await this.request(method, path, body);
@@ -117,7 +185,13 @@ export class NessieBankingProvider implements BankingProvider {
       throw new ProviderError("nessie", `Nessie request failed: ${redact(String(error))}`);
     }
     if (result.status < 200 || result.status >= 300) {
-      throw new ProviderError("nessie", `Nessie returned HTTP ${result.status}`, result.status);
+      const detail =
+        typeof result.json === "string" ? `: ${redact(result.json).slice(0, 200)}` : "";
+      throw new ProviderError(
+        "nessie",
+        `Nessie returned HTTP ${result.status} for ${method} ${path.split("/")[1] ?? ""}${detail}`,
+        result.status,
+      );
     }
     return result.json;
   }
@@ -183,20 +257,37 @@ export class NessieBankingProvider implements BankingProvider {
     return { accountRef };
   }
 
-  async provisionMerchant(input: { sessionId: string; retailer: Retailer; name: string }) {
+  /** Each retailer's pickup store is a Nessie merchant with its address and map location. */
+  async provisionMerchant(input: { sessionId: string; retailer: Retailer; store: StoreLocation }) {
+    const { address, geocode } = input.store;
     const merchantRef = await this.createObject(NESSIE_PATHS.merchants(), {
-      name: `${input.name} (demo)`,
-      category: ["grocery"],
+      name: input.store.name,
+      category: "grocery",
       address: {
-        street_number: "100",
-        street_name: "Franklin St",
-        city: "Chapel Hill",
-        state: "NC",
-        zip: "27514",
+        street_number: address.streetNumber,
+        street_name: address.streetName,
+        city: address.city,
+        state: address.state,
+        zip: address.zip,
       },
-      geocode: { lat: 35.9132, lng: -79.0558 },
+      geocode: { lat: geocode.lat, lng: geocode.lng },
     });
     return { merchantRef };
+  }
+
+  /** Observed 2026-10-11: GET /merchants/{id}/purchases lists every purchase at the merchant. */
+  async listMerchantPurchases(merchantRef: string) {
+    const json = await withRetries(() =>
+      this.call("GET", NESSIE_PATHS.merchantPurchases(merchantRef)),
+    );
+    const parsed = z.array(transactionSchema).safeParse(json);
+    if (!parsed.success) throw new ProviderError("nessie", "Unexpected merchant purchases response");
+    return parsed.data.map((row) => ({
+      id: row._id ?? row.id ?? "",
+      amountCents: nessieAmountToCents(row.amount ?? 0),
+      status: row.status ?? "unknown",
+      date: String((row as { purchase_date?: unknown }).purchase_date ?? ""),
+    }));
   }
 
   async getBalanceCents(accountRef: string): Promise<number> {
@@ -204,6 +295,54 @@ export class NessieBankingProvider implements BankingProvider {
     const parsed = accountSchema.safeParse(json);
     if (!parsed.success) throw new ProviderError("nessie", "Unexpected account response");
     return nessieAmountToCents(parsed.data.balance);
+  }
+
+  async getAccountSummary(accountRef: string) {
+    const json = await withRetries(() => this.call("GET", NESSIE_PATHS.account(accountRef)));
+    const parsed = accountSchema.safeParse(json);
+    if (!parsed.success) throw new ProviderError("nessie", "Unexpected account response");
+    const number = parsed.data.account_number;
+    return {
+      balanceCents: nessieAmountToCents(parsed.data.balance),
+      nickname: parsed.data.nickname ?? "Checking",
+      maskedNumber: number && number.length >= 4 ? `•••• ${number.slice(-4)}` : null,
+    };
+  }
+
+  async provisionBill(input: {
+    sessionId: string;
+    accountRef: string;
+    payee: string;
+    amountCents: number;
+    dueDate: string;
+  }) {
+    const billRef = await this.createObject(NESSIE_PATHS.accountBills(input.accountRef), {
+      status: "pending",
+      payee: input.payee,
+      nickname: input.payee,
+      payment_date: input.dueDate,
+      // Observed: without recurring_date the bill is accepted but GET /accounts/{id}/bills then
+      // fails for the whole account ("validation errors for Bill"), so always send it.
+      recurring_date: Number(input.dueDate.slice(8, 10)),
+      payment_amount: centsToNessieAmount(input.amountCents),
+    });
+    return { billRef };
+  }
+
+  async listBills(accountRef: string) {
+    const json = await withRetries(() => this.call("GET", NESSIE_PATHS.accountBills(accountRef)));
+    const parsed = z.array(billSchema).safeParse(json);
+    if (!parsed.success) throw new ProviderError("nessie", "Unexpected bills response");
+    return parsed.data.map((bill) => ({
+      id: bill._id,
+      payee: bill.payee,
+      // Bills we create use the integer-cents convention; round any foreign fractional amount up.
+      amountCents: Math.ceil(bill.payment_amount),
+      // Observed: upcoming_payment_date rolls a bill due "today" (UTC) to next month, so the
+      // payment_date we set is the reliable due date for one-off bills.
+      dueDate: bill.payment_date ?? bill.upcoming_payment_date ?? "",
+      status: bill.status,
+    }));
   }
 
   /**
@@ -242,21 +381,25 @@ export class NessieBankingProvider implements BankingProvider {
         httpStatus: result.status,
       };
     }
+    const detail = typeof result.json === "string" ? `: ${redact(result.json).slice(0, 200)}` : "";
     return {
       outcome: "rejected",
       code: result.status === 429 ? "RATE_LIMITED" : "PROVIDER_REJECTED",
-      message: `HTTP ${result.status}`,
+      message: `HTTP ${result.status}${detail}`,
       httpStatus: result.status,
     };
   }
 
+  /**
+   * Observed: transfers accept only status/amount/transaction_date/description (no payee field), so
+   * the destination account is recorded in the description. `status` is required and stored as sent.
+   */
   submitTransfer(input: TransferInput): Promise<SubmitOutcome> {
     return this.write(NESSIE_PATHS.accountTransfers(input.fromAccountRef), {
-      medium: "balance",
-      payee_id: input.toAccountRef,
+      status: "completed",
       amount: centsToNessieAmount(input.amountCents),
       transaction_date: today(),
-      description: input.description,
+      description: nessieDescription(input.correlation, input.amountCents, input.toAccountRef),
     });
   }
 
@@ -265,14 +408,57 @@ export class NessieBankingProvider implements BankingProvider {
       merchant_id: input.merchantRef,
       medium: "balance",
       purchase_date: today(),
+      status: "completed",
       amount: centsToNessieAmount(input.amountCents),
-      description: input.description,
+      description: nessieDescription(input.correlation, input.amountCents, input.merchantRef),
     });
   }
 
-  async observe(kind: "transfer" | "purchase", providerId: string): Promise<ObservedOutcome> {
+  /** Observed 2026-10-11: deposits record money in; status is stored as sent. */
+  submitDeposit(input: DepositInput): Promise<SubmitOutcome> {
+    return this.write(NESSIE_PATHS.accountDeposits(input.toAccountRef), {
+      medium: "balance",
+      transaction_date: today(),
+      status: "completed",
+      amount: centsToNessieAmount(input.amountCents),
+      description: nessieDescription(input.correlation, input.amountCents, input.toAccountRef),
+    });
+  }
+
+  /**
+   * A bill payment is a withdrawal record (the money) plus a bill status update. The status update
+   * is idempotent and retried by reconciliation, so a failure there never repeats the withdrawal.
+   */
+  async submitBillPayment(input: BillPaymentInput): Promise<SubmitOutcome> {
+    const outcome = await this.write(NESSIE_PATHS.accountWithdrawals(input.fromAccountRef), {
+      medium: "balance",
+      transaction_date: today(),
+      status: "completed",
+      amount: centsToNessieAmount(input.amountCents),
+      description: nessieDescription(input.correlation, input.amountCents, `bill:${input.billRef}`),
+    });
+    if (outcome.outcome === "accepted") {
+      await this.markBillPaid(input.billRef).catch(() => undefined);
+    }
+    return outcome;
+  }
+
+  /** Observed 2026-10-11: PUT /bills/{id} with a status returns 202; an empty body returns 404. */
+  async markBillPaid(billRef: string): Promise<void> {
+    await withRetries(() => this.call("PUT", NESSIE_PATHS.bill(billRef), { status: "completed" }));
+  }
+
+  async observe(kind: RecordKind, providerId: string, accountRef?: string): Promise<ObservedOutcome> {
+    if (kind === "withdrawal") {
+      if (!accountRef) throw new ProviderError("nessie", "Withdrawals are read through their account");
+      return this.findInList(LIST_PATH.withdrawal(accountRef), (item) => item._id === providerId);
+    }
     const path =
-      kind === "transfer" ? NESSIE_PATHS.transfer(providerId) : NESSIE_PATHS.purchase(providerId);
+      kind === "transfer"
+        ? NESSIE_PATHS.transfer(providerId)
+        : kind === "deposit"
+          ? NESSIE_PATHS.deposit(providerId)
+          : NESSIE_PATHS.purchase(providerId);
     let json: unknown;
     try {
       json = await withRetries(() => this.call("GET", path));
@@ -280,19 +466,52 @@ export class NessieBankingProvider implements BankingProvider {
       if (error instanceof ProviderError && error.httpStatus === 404) return { found: false };
       throw error;
     }
-    const parsed = transactionSchema.safeParse(json);
-    if (!parsed.success) throw new ProviderError("nessie", "Unexpected transaction response");
-    const providerStatus = parsed.data.status ?? "unknown";
-    return {
-      found: true,
-      providerId: parsed.data._id,
-      status: normalizeNessieStatus(providerStatus),
-      providerStatus,
-    };
+    return toObserved(json);
   }
 
-  /** Not verified for Nessie; unknown writes without an ID stay unresolved for the operator. */
-  async findByCorrelation(): Promise<ObservedOutcome> {
-    return { found: false };
+  /**
+   * Verified 2026-10-10: transfers and purchases are listed per paying account and keep the
+   * description we send, so a lost response can be recovered by its correlation prefix. A 404
+   * list response means the account has no records of that kind.
+   */
+  async findByCorrelation(input: {
+    kind: RecordKind;
+    fromAccountRef: string;
+    correlation: string;
+  }): Promise<ObservedOutcome> {
+    return this.findInList(LIST_PATH[input.kind](input.fromAccountRef), (item) =>
+      matchesCorrelation(item.description, input.correlation),
+    );
   }
+
+  /** Read an account listing; a 404 means the account has no records of that kind. */
+  private async findInList(
+    path: string,
+    predicate: (item: { _id?: unknown; description?: unknown }) => boolean,
+  ): Promise<ObservedOutcome> {
+    let json: unknown;
+    try {
+      json = await withRetries(() => this.call("GET", path));
+    } catch (error) {
+      if (error instanceof ProviderError && error.httpStatus === 404) return { found: false };
+      throw error;
+    }
+    if (!Array.isArray(json)) throw new ProviderError("nessie", "Unexpected list response");
+    const match = json.find((item) => predicate(item as { _id?: unknown; description?: unknown }));
+    return match ? toObserved(match) : { found: false };
+  }
+}
+
+function toObserved(json: unknown): ObservedOutcome {
+  const parsed = transactionSchema.safeParse(json);
+  if (!parsed.success) throw new ProviderError("nessie", "Unexpected transaction response");
+  const providerStatus = parsed.data.status ?? "unknown";
+  return {
+    found: true,
+    providerId: parsed.data._id ?? parsed.data.id ?? "",
+    status: normalizeNessieStatus(providerStatus),
+    providerStatus,
+    amountCents:
+      parsed.data.amount === undefined ? undefined : nessieAmountToCents(parsed.data.amount),
+  };
 }

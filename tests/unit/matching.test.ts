@@ -213,17 +213,51 @@ describe("feasibility rules", () => {
     expect(result.proposals).toEqual([]);
   });
 
-  it("requires a supported baseline", () => {
+  it("requires at least one known price for the offer", () => {
     const alex = need("alex", 0, { quantity: 8 });
     const result = findProposals({
       initiatingNeed: alex,
       candidateNeeds: [need("b", 5, { quantity: 16 })],
-      offers: [offer()],
+      offers: [offer({ baselines: [] })],
       shoppers: shoppers([alex]),
       now,
     });
     expect(result.proposals).toEqual([]);
     expect(result.exclusions[0]).toMatchObject({ needId: "alex", reason: "no_baseline" });
+  });
+
+  it("groups quantities without a known price using a labeled estimate", () => {
+    const full = offer({
+      baselines: [
+        { quantity: 4, baselineCents: 1500 },
+        { quantity: 6, baselineCents: 2200 },
+        { quantity: 8, baselineCents: 2900 },
+        { quantity: 12, baselineCents: 4300 },
+      ],
+    });
+    const alex = need("alex", 0, { quantity: 5 });
+    const others = [
+      need("b", 10, { quantity: 7 }),
+      need("c", 9, { quantity: 12, maxContributionCents: 4000 }),
+    ];
+    const result = findProposals({
+      initiatingNeed: alex,
+      candidateNeeds: others,
+      offers: [full],
+      shoppers: shoppers([alex, ...others]),
+      now,
+    });
+    const allocations = result.proposals[0]?.allocations ?? [];
+    expect(allocations.find((row) => row.needId === "alex")).toMatchObject({
+      contributionCents: 1250,
+      baselineCents: 1850,
+      baselineEstimated: true,
+      savingsCents: 600,
+    });
+    expect(allocations.find((row) => row.needId === "c")).toMatchObject({
+      baselineCents: 4300,
+      baselineEstimated: false,
+    });
   });
 
   it("chooses the oldest eligible member as organizer for membership offers", () => {

@@ -1,14 +1,66 @@
 {
-  "fixtureVersion": "catalog-2026-10-10.1",
+  "fixtureVersion": "catalog-2026-10-11.1",
   "notice": "Fictional demo offers labeled with real retailer names. Prices, inventory and membership rules are illustrative, not current retail data.",
   "pickupZone": {
     "key": "chapel-hill-central",
     "label": "Franklin St. pickup point, Chapel Hill"
   },
   "pickupWindows": [
-    { "key": "window-a", "startOffsetHours": 22, "durationHours": 2 },
-    { "key": "window-b", "startOffsetHours": 46, "durationHours": 2 }
+    {
+      "key": "window-a",
+      "startOffsetHours": 22,
+      "durationHours": 2
+    },
+    {
+      "key": "window-b",
+      "startOffsetHours": 46,
+      "durationHours": 2
+    }
   ],
+  "stores": {
+    "walmart": {
+      "name": "Walmart Chapel Hill (fictional demo store)",
+      "address": {
+        "streetNumber": "1500",
+        "streetName": "Fordham Blvd",
+        "city": "Chapel Hill",
+        "state": "NC",
+        "zip": "27514"
+      },
+      "geocode": {
+        "lat": 35.9312,
+        "lng": -79.0232
+      }
+    },
+    "costco": {
+      "name": "Costco Durham (fictional demo warehouse)",
+      "address": {
+        "streetNumber": "3700",
+        "streetName": "Mount Moriah Rd",
+        "city": "Durham",
+        "state": "NC",
+        "zip": "27707"
+      },
+      "geocode": {
+        "lat": 35.9581,
+        "lng": -78.9934
+      }
+    },
+    "sams_club": {
+      "name": "Sam's Club Durham (fictional demo club)",
+      "address": {
+        "streetNumber": "8300",
+        "streetName": "Renaissance Pkwy",
+        "city": "Durham",
+        "state": "NC",
+        "zip": "27713"
+      },
+      "geocode": {
+        "lat": 35.9068,
+        "lng": -78.9408
+      }
+    }
+  },
   "offers": [
     {
       "key": "wm-paper-towels-24",
@@ -23,13 +75,28 @@
       "taxCents": 0,
       "feeCents": 0,
       "baselines": [
-        { "quantity": 4, "baselineCents": 1500 },
-        { "quantity": 6, "baselineCents": 2200 },
-        { "quantity": 8, "baselineCents": 2900 },
-        { "quantity": 12, "baselineCents": 4300 }
+        {
+          "quantity": 4,
+          "baselineCents": 1500
+        },
+        {
+          "quantity": 6,
+          "baselineCents": 2200
+        },
+        {
+          "quantity": 8,
+          "baselineCents": 2900
+        },
+        {
+          "quantity": 12,
+          "baselineCents": 4300
+        }
       ],
       "membershipRequired": null,
-      "pickupWindows": ["window-a", "window-b"],
+      "pickupWindows": [
+        "window-a",
+        "window-b"
+      ],
       "available": true,
       "expiresInHours": 72,
       "image": "/products/paper-towels.svg"
@@ -47,12 +114,23 @@
       "taxCents": 0,
       "feeCents": 0,
       "baselines": [
-        { "quantity": 5, "baselineCents": 1800 },
-        { "quantity": 10, "baselineCents": 3500 },
-        { "quantity": 15, "baselineCents": 5200 }
+        {
+          "quantity": 5,
+          "baselineCents": 1800
+        },
+        {
+          "quantity": 10,
+          "baselineCents": 3500
+        },
+        {
+          "quantity": 15,
+          "baselineCents": 5200
+        }
       ],
       "membershipRequired": "costco",
-      "pickupWindows": ["window-b"],
+      "pickupWindows": [
+        "window-b"
+      ],
       "available": true,
       "expiresInHours": 72,
       "image": "/products/paper-towels.svg"
@@ -70,11 +148,19 @@
       "taxCents": 0,
       "feeCents": 0,
       "baselines": [
-        { "quantity": 3, "baselineCents": 1100 },
-        { "quantity": 5, "baselineCents": 1800 }
+        {
+          "quantity": 3,
+          "baselineCents": 1100
+        },
+        {
+          "quantity": 5,
+          "baselineCents": 1800
+        }
       ],
       "membershipRequired": "sams_club",
-      "pickupWindows": ["window-a"],
+      "pickupWindows": [
+        "window-a"
+      ],
       "available": true,
       "expiresInHours": 72,
       "image": "/products/paper-towels.svg"
@@ -92,12 +178,24 @@
       "taxCents": 0,
       "feeCents": 0,
       "baselines": [
-        { "quantity": 12, "baselineCents": 900 },
-        { "quantity": 16, "baselineCents": 1150 },
-        { "quantity": 24, "baselineCents": 1700 }
+        {
+          "quantity": 12,
+          "baselineCents": 900
+        },
+        {
+          "quantity": 16,
+          "baselineCents": 1150
+        },
+        {
+          "quantity": 24,
+          "baselineCents": 1700
+        }
       ],
       "membershipRequired": null,
-      "pickupWindows": ["window-a", "window-b"],
+      "pickupWindows": [
+        "window-a",
+        "window-b"
+      ],
       "available": true,
       "expiresInHours": 72,
       "image": "/products/snack-bars.svg"
@@ -115,12 +213,23 @@
       "taxCents": 0,
       "feeCents": 0,
       "baselines": [
-        { "quantity": 12, "baselineCents": 850 },
-        { "quantity": 20, "baselineCents": 1350 },
-        { "quantity": 30, "baselineCents": 1950 }
+        {
+          "quantity": 12,
+          "baselineCents": 850
+        },
+        {
+          "quantity": 20,
+          "baselineCents": 1350
+        },
+        {
+          "quantity": 30,
+          "baselineCents": 1950
+        }
       ],
       "membershipRequired": "costco",
-      "pickupWindows": ["window-b"],
+      "pickupWindows": [
+        "window-b"
+      ],
       "available": true,
       "expiresInHours": 72,
       "image": "/products/snack-bars.svg"
@@ -138,11 +247,19 @@
       "taxCents": 0,
       "feeCents": 0,
       "baselines": [
-        { "quantity": 10, "baselineCents": 1100 },
-        { "quantity": 20, "baselineCents": 2100 }
+        {
+          "quantity": 10,
+          "baselineCents": 1100
+        },
+        {
+          "quantity": 20,
+          "baselineCents": 2100
+        }
       ],
       "membershipRequired": "sams_club",
-      "pickupWindows": ["window-a"],
+      "pickupWindows": [
+        "window-a"
+      ],
       "available": true,
       "expiresInHours": 72,
       "image": "/products/snack-bars.svg"
@@ -160,11 +277,20 @@
       "taxCents": 0,
       "feeCents": 0,
       "baselines": [
-        { "quantity": 30, "baselineCents": 1050 },
-        { "quantity": 45, "baselineCents": 1500 }
+        {
+          "quantity": 30,
+          "baselineCents": 1050
+        },
+        {
+          "quantity": 45,
+          "baselineCents": 1500
+        }
       ],
       "membershipRequired": null,
-      "pickupWindows": ["window-a", "window-b"],
+      "pickupWindows": [
+        "window-a",
+        "window-b"
+      ],
       "available": true,
       "expiresInHours": 72,
       "image": "/products/trash-bags.svg"
@@ -182,11 +308,19 @@
       "taxCents": 0,
       "feeCents": 0,
       "baselines": [
-        { "quantity": 50, "baselineCents": 1300 },
-        { "quantity": 100, "baselineCents": 2400 }
+        {
+          "quantity": 50,
+          "baselineCents": 1300
+        },
+        {
+          "quantity": 100,
+          "baselineCents": 2400
+        }
       ],
       "membershipRequired": "costco",
-      "pickupWindows": ["window-b"],
+      "pickupWindows": [
+        "window-b"
+      ],
       "available": true,
       "expiresInHours": 72,
       "image": "/products/trash-bags.svg"
@@ -204,12 +338,23 @@
       "taxCents": 0,
       "feeCents": 0,
       "baselines": [
-        { "quantity": 30, "baselineCents": 1100 },
-        { "quantity": 40, "baselineCents": 1400 },
-        { "quantity": 60, "baselineCents": 2000 }
+        {
+          "quantity": 30,
+          "baselineCents": 1100
+        },
+        {
+          "quantity": 40,
+          "baselineCents": 1400
+        },
+        {
+          "quantity": 60,
+          "baselineCents": 2000
+        }
       ],
       "membershipRequired": "sams_club",
-      "pickupWindows": ["window-a"],
+      "pickupWindows": [
+        "window-a"
+      ],
       "available": true,
       "expiresInHours": 72,
       "image": "/products/trash-bags.svg"

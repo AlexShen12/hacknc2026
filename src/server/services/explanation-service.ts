@@ -40,6 +40,7 @@ export async function explainGroup(
       quantity: member.quantity,
       contributionCents: member.contributionCents,
       baselineCents: member.baselineCents,
+      baselineEstimated: member.baselineEstimated,
       savingsCents: member.savingsCents,
     })),
     totalSavingsCents: members.reduce((sum, member) => sum + member.savingsCents, 0),
@@ -53,26 +54,24 @@ export async function explainGroup(
     stored = check.ok
       ? {
           proposalVersion: evidence.proposalVersion,
-          source: providers.analytics.name === "snowflake" ? "cortex" : "template",
+          source: "template",
           text: check.text,
           status: "ready",
-          requestId: response.requestId,
           generatedAt: runtime.now().toISOString(),
         }
       : {
           proposalVersion: evidence.proposalVersion,
-          source: providers.analytics.name === "snowflake" ? "cortex" : "template",
+          source: "template",
           text: null,
           status: "unavailable",
           reason: `rejected_${check.reason}`,
-          requestId: response.requestId,
           generatedAt: runtime.now().toISOString(),
         };
   } catch (error) {
     log("warn", "explanation.failed", { sessionId: session.id, groupId, error: String(error) });
     stored = {
       proposalVersion: evidence.proposalVersion,
-      source: providers.analytics.name === "snowflake" ? "cortex" : "template",
+      source: "template",
       text: null,
       status: "unavailable",
       reason: "provider_error",

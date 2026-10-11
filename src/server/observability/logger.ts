@@ -3,7 +3,7 @@ export function redact(text: string): string {
   return text
     .replace(/([?&]key=)[^&\s"']+/gi, "$1[REDACTED]")
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
-    .replace(/\b\d{12,19}\b/g, "[REDACTED_NUMBER]");
+    .replace(/(?<![\w-])\d{12,19}(?![\w-])/g, "[REDACTED_NUMBER]");
 }
 
 type Level = "info" | "warn" | "error";

@@ -8,6 +8,27 @@
       "when": 1791663499808,
       "tag": "0000_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791666852737,
+      "tag": "0001_open_groups_autopay_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791689377055,
+      "tag": "0002_estimates_and_bills",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791692692124,
+      "tag": "0003_neon_nessie_wallet",
+      "breakpoints": true
     }
   ]
 }

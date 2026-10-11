@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { DomainError } from "@/domain/errors";
 import type { ProviderMode, Retailer } from "@/domain/types";
-import { formatPickupWindow, RETAILER_LABELS } from "@/lib/format";
+import { easternDate, formatPickupWindow, RETAILER_LABELS } from "@/lib/format";
 import type { SessionView } from "@/lib/view-types";
 import { getConfig, isSponsorConfigured } from "@/server/config";
 import { getDb } from "@/server/db/client";
@@ -11,7 +11,7 @@ import { loadPersonas } from "@/server/fixtures";
 import { log } from "@/server/observability/logger";
 import { providersFor } from "@/server/providers";
 import { runtime } from "@/server/runtime";
-import { appendSessionEvent, enqueueNeed, enqueueOffer } from "@/server/services/records";
+import { appendSessionEvent } from "@/server/services/records";
 
 export type SessionRow = typeof demoSessions.$inferSelect;
 
@@ -113,7 +113,6 @@ export async function createSession(input: {
         })),
       )
       .returning();
-    for (const offer of offerRows) await enqueueOffer(tx, offer);
 
     for (const persona of scenario.personas) {
       if (!persona.seededNeed) continue;
@@ -133,7 +132,6 @@ export async function createSession(input: {
           createdAt: new Date(now.getTime() - seed.minutesBeforeSession * 60_000),
         })
         .returning();
-      if (need) await enqueueNeed(tx, need);
     }
     await appendSessionEvent(tx, {
       sessionId,
@@ -156,6 +154,16 @@ export async function createSession(input: {
         .update(shoppers)
         .set({ customerRef: refs.customerRef, fundingAccountRef: refs.accountRef })
         .where(eq(shoppers.id, shopper.id));
+      const persona = scenario.personas.find((item) => item.key === shopper.personaKey);
+      for (const bill of persona?.bills ?? []) {
+        await providers.banking.provisionBill({
+          sessionId,
+          accountRef: refs.accountRef,
+          payee: bill.payee,
+          amountCents: bill.amountCents,
+          dueDate: easternDate(new Date(now.getTime() + bill.dueInDays * 86_400_000)),
+        });
+      }
     }
     const collection = await providers.banking.provisionCollectionCustomer({ sessionId });
     const merchantRefs: Partial<Record<Retailer, string>> = {};
@@ -163,7 +171,7 @@ export async function createSession(input: {
       const { merchantRef } = await providers.banking.provisionMerchant({
         sessionId,
         retailer,
-        name: RETAILER_LABELS[retailer],
+        store: catalog.stores[retailer],
       });
       merchantRefs[retailer] = merchantRef;
     }
@@ -264,7 +272,13 @@ export async function getSessionView(session: SessionRow): Promise<SessionView> 
     };
   } catch (error) {
     providerInfo = {
-      banking: { name: "unavailable", correlationLookup: false, amountUnit: "", verified: false },
+      banking: {
+        name: "unavailable",
+        correlationLookup: false,
+        correlationAbsenceIsProof: false,
+        amountUnit: "",
+        verified: false,
+      },
       analytics: "unavailable",
       retail: "fixtures",
       healthy: false,

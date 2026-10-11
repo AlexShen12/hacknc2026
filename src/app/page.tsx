@@ -1,14 +1,16 @@
-import { HandCoins, PackageOpen, Users } from "lucide-react";
+import { Database, HandCoins, Landmark, PackageOpen, Users } from "lucide-react";
 import Link from "next/link";
 import { PersonaPicker } from "@/components/persona-picker";
 import { StartDemo } from "@/components/start-demo";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { isSponsorConfigured } from "@/server/config";
+import { databaseLabel, isSponsorConfigured } from "@/server/config";
 import { getPageSession } from "@/server/page-session";
 
 export default async function HomePage() {
   const current = await getPageSession();
   const sponsorConfigured = isSponsorConfigured();
+  const onNeon = databaseLabel() === "Neon Postgres";
 
   return (
     <div className="flex flex-col gap-10">
@@ -62,6 +64,43 @@ export default async function HomePage() {
               </div>
             </div>
           ))}
+        </Card>
+      </section>
+      <section className="grid gap-4 md:grid-cols-2" aria-labelledby="sponsors-title">
+        <h2 id="sponsors-title" className="sr-only">
+          How the sponsor platforms are used
+        </h2>
+        <Card className="flex flex-col gap-2">
+          <p className="flex items-center gap-2 font-bold">
+            <Landmark size={20} aria-hidden className="text-savings" /> Capital One Nessie
+            {sponsorConfigured ? (
+              <Badge tone="savings">Live sandbox</Badge>
+            ) : (
+              <Badge>Not configured</Badge>
+            )}
+          </p>
+          <ul className="list-disc pl-5 text-sm text-muted">
+            <li>Each shopper gets a Nessie customer, checking account and upcoming bills.</li>
+            <li>Contributions, returns and the merchant purchase are recorded in Nessie.</li>
+            <li>
+              Every record is read back and verified before money counts or a purchase happens.
+            </li>
+            <li>Bills due before pickup decide what a shopper can safely contribute.</li>
+            <li>Wallet top-ups are Nessie deposits; paying a bill records a withdrawal and marks it paid.</li>
+            <li>Each store is a Nessie merchant with its address; spending is read back per store.</li>
+          </ul>
+        </Card>
+        <Card className="flex flex-col gap-2">
+          <p className="flex items-center gap-2 font-bold">
+            <Database size={20} aria-hidden className="text-savings" /> Neon Postgres
+            {onNeon ? <Badge tone="savings">Live database</Badge> : <Badge>Local Postgres</Badge>}
+          </p>
+          <ul className="list-disc pl-5 text-sm text-muted">
+            <li>Every request, group, consent and money movement lives in Postgres 18 on Neon.</li>
+            <li>SQL finds compatible neighbors and powers community insights, straight on live data.</li>
+            <li>One click snapshots the whole demo to a Neon branch, without touching live data.</li>
+            <li>Explanations are written from verified calculations, never invented.</li>
+          </ul>
         </Card>
       </section>
       {current ? <PersonaPicker session={current.view} /> : null}

@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { DomainError } from "@/domain/errors";
-import type { MatchNeed, OfferTerms } from "@/domain/types";
+import { hasLeft, type MatchNeed, type OfferTerms } from "@/domain/types";
 import type { DbOrTx, Tx } from "@/server/db/client";
 import {
   type allocations,
@@ -10,7 +10,6 @@ import {
   type OfferSnapshot,
   type offers,
   type shoppers,
-  syncOutbox,
   workflowEvents,
 } from "@/server/db/schema";
 
@@ -113,98 +112,6 @@ export async function appendSessionEvent(
     actor: input.actor,
     type: input.type,
     payload: input.payload ?? {},
-  });
-}
-
-// --- Analytical outbox payloads (keys are lower-cased Snowflake column names) ---
-
-export async function enqueueOffer(tx: DbOrTx, offer: OfferRow): Promise<void> {
-  await tx.insert(syncOutbox).values({
-    sessionId: offer.sessionId,
-    entityType: "offer",
-    entityId: offer.id,
-    entityVersion: offer.version,
-    status: "pending",
-    payload: {
-      retailer: offer.retailer,
-      sku: offer.sku,
-      product_family: offer.productFamily,
-      package_quantity: offer.packageQuantity,
-      total_cents: offer.totalCents,
-      baselines: offer.baselines,
-      membership_required: offer.membershipRequired,
-      pickup_zone: offer.pickupZone,
-      pickup_windows: offer.pickupWindows,
-      available: offer.available,
-      expires_at: offer.expiresAt.toISOString(),
-      source_kind: offer.sourceKind,
-      retrieved_at: offer.retrievedAt.toISOString(),
-    },
-  });
-}
-
-export async function enqueueNeed(tx: DbOrTx, need: NeedRow): Promise<void> {
-  await tx.insert(syncOutbox).values({
-    sessionId: need.sessionId,
-    entityType: "need",
-    entityId: need.id,
-    entityVersion: need.revision,
-    status: "pending",
-    payload: {
-      shopper_id: need.shopperId,
-      accepted_offer_ids: need.acceptedOfferIds,
-      quantity: need.quantity,
-      max_contribution_cents: need.maxContributionCents,
-      pickup_zone: need.pickupZone,
-      pickup_window: need.pickupWindow,
-      status: need.status,
-      created_at: need.createdAt.toISOString(),
-    },
-  });
-}
-
-export async function enqueueGroup(tx: DbOrTx, group: GroupRow, members: AllocationRow[]) {
-  const active = members.filter((member) => member.state !== "departed");
-  await tx.insert(syncOutbox).values({
-    sessionId: group.sessionId,
-    entityType: "group",
-    entityId: group.id,
-    entityVersion: group.version,
-    status: "pending",
-    payload: {
-      offer_id: group.offerId,
-      status: group.status,
-      total_cents: group.totalCents,
-      total_savings_cents: active.reduce((sum, member) => sum + member.savingsCents, 0),
-      member_count: active.length,
-      allocations: members.map((member) => ({
-        allocation_id: member.id,
-        shopper_id: member.shopperId,
-        quantity: member.quantity,
-        contribution_cents: member.contributionCents,
-        savings_cents: member.savingsCents,
-        state: member.state,
-      })),
-      updated_at: group.updatedAt.toISOString(),
-    },
-  });
-}
-
-export async function enqueueOperation(tx: DbOrTx, operation: OperationRow): Promise<void> {
-  await tx.insert(syncOutbox).values({
-    sessionId: operation.sessionId,
-    entityType: "operation",
-    entityId: operation.id,
-    entityVersion: operation.revision,
-    status: "pending",
-    payload: {
-      group_id: operation.groupId,
-      kind: operation.kind,
-      status: operation.status,
-      amount_cents: operation.amountCents,
-      provider_id: operation.providerId,
-      updated_at: operation.updatedAt.toISOString(),
-    },
   });
 }
 

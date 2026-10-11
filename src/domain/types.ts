@@ -2,6 +2,7 @@ export const PROVIDER_MODES = ["sponsor", "rehearsal"] as const;
 export type ProviderMode = (typeof PROVIDER_MODES)[number];
 
 export const GROUP_STATUSES = [
+  "open",
   "awaiting_confirmation",
   "funding",
   "returning_contribution",
@@ -15,6 +16,11 @@ export const GROUP_STATUSES = [
 ] as const;
 export type GroupStatus = (typeof GROUP_STATUSES)[number];
 
+/** `matched`: proposed by the optimizer. `organizer`: created by a shopper and filled by joiners. */
+export type GroupOrigin = "matched" | "organizer";
+/** `private`: matched proposal. `public`: listed for nearby shoppers. `invite`: link only. */
+export type GroupVisibility = "private" | "public" | "invite";
+
 export const OPERATION_STATUSES = [
   "prepared",
   "dispatching",
@@ -24,14 +30,30 @@ export const OPERATION_STATUSES = [
   "unknown",
 ] as const;
 export type OperationStatus = (typeof OPERATION_STATUSES)[number];
-export type OperationKind = "contribution" | "return" | "purchase";
+/** Group money movements, plus wallet top-ups and bill payments that belong to no group. */
+export type OperationKind = "contribution" | "return" | "purchase" | "deposit" | "bill_payment";
 
 /** `forming` is open shopping demand before a proposal reserves it. */
 export const NEED_STATUSES = ["forming", "reserved", "withdrawn", "fulfilled"] as const;
 export type NeedStatus = (typeof NEED_STATUSES)[number];
 
-export const ALLOCATION_STATES = ["active", "departing", "departed", "picked_up"] as const;
+/**
+ * `departed`: left after terms were frozen; the share is a vacancy to refill exactly.
+ * `released`: left an organizer group before it filled; the units simply became available again.
+ */
+export const ALLOCATION_STATES = [
+  "active",
+  "departing",
+  "departed",
+  "released",
+  "picked_up",
+] as const;
 export type AllocationState = (typeof ALLOCATION_STATES)[number];
+
+/** True once a shopper is no longer part of the group (vacated or released). */
+export function hasLeft(state: AllocationState): boolean {
+  return state === "departed" || state === "released";
+}
 
 export type Retailer = "walmart" | "costco" | "sams_club";
 export type Membership = "costco" | "sams_club";
@@ -87,6 +109,8 @@ export interface ProposedAllocation {
   quantity: number;
   contributionCents: number;
   baselineCents: number;
+  /** True when the comparison price was estimated from the closest known prices. */
+  baselineEstimated: boolean;
   savingsCents: number;
 }
 

@@ -1,8 +1,7 @@
 import type { ProviderMode } from "@/domain/types";
 import { getSponsorConfig } from "@/server/config";
 import { getDb } from "@/server/db/client";
-import { LocalAnalyticsProvider } from "@/server/providers/analytics/local";
-import { SnowflakeAnalyticsProvider } from "@/server/providers/analytics/snowflake";
+import { PostgresAnalyticsProvider } from "@/server/providers/analytics/postgres";
 import type { AnalyticsProvider } from "@/server/providers/analytics/types";
 import { NessieBankingProvider } from "@/server/providers/banking/nessie";
 import { RehearsalBankingProvider } from "@/server/providers/banking/rehearsal";
@@ -21,12 +20,13 @@ type Factory = (mode: ProviderMode) => Providers;
 
 const defaultFactory: Factory = (mode) => {
   if (mode === "sponsor") {
-    // Throws SPONSOR_NOT_CONFIGURED; a sponsor session never falls back to rehearsal providers.
+    // Live Nessie banking; analytics on the application database (Neon). Throws
+    // SPONSOR_NOT_CONFIGURED rather than falling back to the rehearsal bank.
     const config = getSponsorConfig();
     return {
       mode,
       banking: new NessieBankingProvider(config.nessie),
-      analytics: new SnowflakeAnalyticsProvider(config.snowflake),
+      analytics: new PostgresAnalyticsProvider(getDb()),
       retail: new FixtureRetailProvider(),
     };
   }
@@ -34,7 +34,7 @@ const defaultFactory: Factory = (mode) => {
   return {
     mode,
     banking: new RehearsalBankingProvider(db),
-    analytics: new LocalAnalyticsProvider(db),
+    analytics: new PostgresAnalyticsProvider(db),
     retail: new FixtureRetailProvider(),
   };
 };

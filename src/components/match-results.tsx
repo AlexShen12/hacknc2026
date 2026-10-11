@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AllocationTable } from "@/components/allocation-table";
 import { ExplanationCard } from "@/components/explanation-card";
+import { OpenGroupCard } from "@/components/open-group-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, SectionTitle } from "@/components/ui/card";
@@ -84,9 +85,7 @@ export function MatchResults({
         <Card aria-live="polite">
           <p className="font-semibold">Finding neighbors who need the rest of the package…</p>
           <p className="text-sm text-muted">
-            {mode === "sponsor"
-              ? "Syncing requests to Snowflake and running the candidate query."
-              : "Running the local candidate query (rehearsal)."}
+            Searching open requests with the same product, pickup slot and a budget that fits.
           </p>
         </Card>
       ) : null}
@@ -171,7 +170,6 @@ export function MatchResults({
                     <ExplanationCard
                       groupId={group.id}
                       initial={group.explanation}
-                      analyticsSource={group.analytics.source}
                     />
                     <AllocationTable group={group} />
                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -194,6 +192,21 @@ export function MatchResults({
               })}
             </section>
           )}
+
+          {result.openGroups.length > 0 ? (
+            <section className="flex flex-col gap-3" aria-labelledby="open-title">
+              <SectionTitle id="open-title">Or join an open group</SectionTitle>
+              <p className="text-sm text-muted">
+                Neighbors started these groups for the same product and pickup slot, and your{" "}
+                {need.quantity} {offer?.unit} fit within your limit.
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                {result.openGroups.map((group) => (
+                  <OpenGroupCard key={group.id} group={group} />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {result.exclusions.length > 0 ? (
             <section className="flex flex-col gap-3" aria-labelledby="excluded-title">
@@ -224,13 +237,8 @@ export function MatchResults({
             </SectionTitle>
             <Card className="flex flex-col gap-3">
               <p className="text-sm text-muted">
-                Source:{" "}
-                {result.analytics.source === "snowflake"
-                  ? `Snowflake SQL API (statement ${result.analytics.queryIds.join(", ")})`
-                  : "local rehearsal query over the same records (no Snowflake call)"}
-                {result.analytics.syncedThroughOutboxId !== null
-                  ? ` · synced through outbox #${result.analytics.syncedThroughOutboxId}`
-                  : ""}
+                Live SQL on {result.analytics.engine}, over every open request in this
+                session.
               </p>
               <ul className="grid gap-2 sm:grid-cols-2">
                 {result.demand.map((row) => (

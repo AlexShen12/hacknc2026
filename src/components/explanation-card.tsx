@@ -11,12 +11,10 @@ export function ExplanationCard({
   groupId,
   initial,
   autoRequest = true,
-  analyticsSource,
 }: {
   groupId: string;
   initial: ExplanationView | null;
   autoRequest?: boolean;
-  analyticsSource: "snowflake" | "local";
 }) {
   const [explanation, setExplanation] = useState(initial);
   const [loading, setLoading] = useState(false);
@@ -42,8 +40,7 @@ export function ExplanationCard({
     }
   }, [autoRequest, initial, request]);
 
-  const source =
-    analyticsSource === "snowflake" ? "Snowflake Cortex" : "Rehearsal template (no AI call)";
+  const source = "Written from the verified numbers";
   return (
     <div className="rounded-xl border border-savings/20 bg-savings-soft/60 p-4" aria-live="polite">
       <div className="mb-1 flex items-center justify-between gap-2">

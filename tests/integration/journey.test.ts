@@ -79,8 +79,7 @@ describe("featured funded-dropout journey", () => {
     expect(await s.balance("jordan")).toBe(10000);
     expect((await s.needOf("jordan"))?.status).toBe("withdrawn");
 
-    await findReplacement(s.providers, await s.ctx("alex"), groupId, view.version);
-    view = await s.view(groupId);
+    // Auto-replacement (on by default) already offered Casey the exact share.
     const casey = view.allocations.find((row) => row.name === "Casey");
     expect(casey).toMatchObject({
       quantity: 6,
@@ -251,9 +250,8 @@ describe("failure and recovery workflows", () => {
     const s = await startScenario();
     const { groupId } = await fundedGroup(s);
     for (const persona of ["alex", "jordan", "sam"] as Persona[]) await pay(s, groupId, persona);
-    // Casey takes Jordan's slot; then Sam leaves and only Taylor (over budget) remains.
+    // Casey is auto-offered Jordan's slot; then Sam leaves and only Taylor (over budget) remains.
     await withdraw(s.providers, await s.ctx("jordan"), groupId, await s.version(groupId));
-    await findReplacement(s.providers, await s.ctx("alex"), groupId, await s.version(groupId));
     await confirmTerms(s.providers, await s.ctx("casey"), groupId, await s.version(groupId));
     await withdraw(s.providers, await s.ctx("sam"), groupId, await s.version(groupId));
     expect((await s.view(groupId)).status).toBe("replacement_needed");

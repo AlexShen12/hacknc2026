@@ -1,9 +1,16 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
-import { demoSessions, rehearsalAccounts, rehearsalTransactions } from "@/server/db/schema";
+import {
+  demoSessions,
+  rehearsalAccounts,
+  rehearsalBills,
+  rehearsalTransactions,
+} from "@/server/db/schema";
 import type {
   BankingProvider,
   ObservedOutcome,
+  RecordKind,
+  StoreLocation,
   SubmitOutcome,
 } from "@/server/providers/banking/types";
 import { ProviderError } from "@/server/providers/errors";
@@ -20,15 +27,17 @@ export class RehearsalBankingProvider implements BankingProvider {
   readonly name = "rehearsal-ledger" as const;
   readonly capabilities = {
     correlationLookup: true,
+    correlationAbsenceIsProof: true,
     amountUnit: "integer cents (local ledger)",
     verified: true,
+    balanceEffects: true,
   };
 
   constructor(private readonly db: Db) {}
 
   private async createAccount(
     sessionId: string,
-    ownerKind: "shopper" | "collection" | "merchant",
+    ownerKind: "shopper" | "collection" | "merchant" | "external",
     label: string,
     balanceCents: number,
   ): Promise<string> {
@@ -67,9 +76,65 @@ export class RehearsalBankingProvider implements BankingProvider {
     return { accountRef };
   }
 
-  async provisionMerchant(input: { sessionId: string; name: string }) {
-    const merchantRef = await this.createAccount(input.sessionId, "merchant", input.name, 0);
+  async provisionMerchant(input: { sessionId: string; store: StoreLocation }) {
+    const merchantRef = await this.createAccount(input.sessionId, "merchant", input.store.name, 0);
     return { merchantRef };
+  }
+
+  async listMerchantPurchases(merchantRef: string) {
+    const rows = await this.db
+      .select()
+      .from(rehearsalTransactions)
+      .where(
+        and(
+          eq(rehearsalTransactions.kind, "purchase"),
+          eq(rehearsalTransactions.payeeAccountId, merchantRef),
+        ),
+      );
+    return rows.map((row) => ({
+      id: row.id,
+      amountCents: row.amountCents,
+      status: row.status === "executed" ? "completed" : row.status,
+      date: row.createdAt.toISOString().slice(0, 10),
+    }));
+  }
+
+  /** The session's stand-in for the outside world: sends top-ups and receives bill payments. */
+  private async outsideAccount(sessionId: string): Promise<string> {
+    const [existing] = await this.db
+      .select({ id: rehearsalAccounts.id })
+      .from(rehearsalAccounts)
+      .where(
+        and(eq(rehearsalAccounts.sessionId, sessionId), eq(rehearsalAccounts.ownerKind, "external")),
+      );
+    if (existing) return existing.id;
+    return this.createAccount(sessionId, "external", "Outside world", 1_000_000_000);
+  }
+
+  async submitDeposit(input: Parameters<BankingProvider["submitDeposit"]>[0]) {
+    return this.move("deposit", {
+      ...input,
+      fromAccountRef: await this.outsideAccount(input.sessionId),
+      toRef: input.toAccountRef,
+    });
+  }
+
+  async submitBillPayment(input: Parameters<BankingProvider["submitBillPayment"]>[0]) {
+    const outcome = await this.move("withdrawal", {
+      ...input,
+      toRef: await this.outsideAccount(input.sessionId),
+    });
+    if (outcome.outcome === "accepted" && outcome.status === "confirmed") {
+      await this.markBillPaid(input.billRef);
+    }
+    return outcome;
+  }
+
+  async markBillPaid(billRef: string) {
+    await this.db
+      .update(rehearsalBills)
+      .set({ status: "completed" })
+      .where(eq(rehearsalBills.id, billRef));
   }
 
   async getBalanceCents(accountRef: string): Promise<number> {
@@ -79,6 +144,49 @@ export class RehearsalBankingProvider implements BankingProvider {
       .where(eq(rehearsalAccounts.id, accountRef));
     if (!account) throw new ProviderError("rehearsal-ledger", "Account not found", 404);
     return account.balanceCents;
+  }
+
+  async getAccountSummary(accountRef: string) {
+    const [account] = await this.db
+      .select()
+      .from(rehearsalAccounts)
+      .where(eq(rehearsalAccounts.id, accountRef));
+    if (!account) throw new ProviderError("rehearsal-ledger", "Account not found", 404);
+    return { balanceCents: account.balanceCents, nickname: account.label, maskedNumber: null };
+  }
+
+  async provisionBill(input: {
+    sessionId: string;
+    accountRef: string;
+    payee: string;
+    amountCents: number;
+    dueDate: string;
+  }) {
+    const billRef = runtime.newId("rbill");
+    await this.db.insert(rehearsalBills).values({
+      id: billRef,
+      sessionId: input.sessionId,
+      accountId: input.accountRef,
+      payee: input.payee,
+      amountCents: input.amountCents,
+      dueDate: input.dueDate,
+      status: "pending",
+    });
+    return { billRef };
+  }
+
+  async listBills(accountRef: string) {
+    const rows = await this.db
+      .select()
+      .from(rehearsalBills)
+      .where(eq(rehearsalBills.accountId, accountRef));
+    return rows.map((row) => ({
+      id: row.id,
+      payee: row.payee,
+      amountCents: row.amountCents,
+      dueDate: row.dueDate,
+      status: row.status,
+    }));
   }
 
   private async takeFault(sessionId: string): Promise<Fault | null> {
@@ -94,7 +202,7 @@ export class RehearsalBankingProvider implements BankingProvider {
   }
 
   private async move(
-    kind: "transfer" | "purchase",
+    kind: RecordKind,
     input: {
       sessionId: string;
       fromAccountRef: string;
@@ -165,7 +273,7 @@ export class RehearsalBankingProvider implements BankingProvider {
   }
 
   /** Observing a pending rehearsal transaction settles it, simulating asynchronous processing. */
-  async observe(_kind: "transfer" | "purchase", providerId: string): Promise<ObservedOutcome> {
+  async observe(_kind: RecordKind, providerId: string): Promise<ObservedOutcome> {
     return this.db.transaction(async (tx) => {
       const [txn] = await tx
         .select()
@@ -191,6 +299,7 @@ export class RehearsalBankingProvider implements BankingProvider {
           providerId: txn.id,
           status: executable ? "confirmed" : "failed",
           providerStatus: executable ? "executed" : "cancelled",
+          amountCents: txn.amountCents,
         };
       }
       return {
@@ -198,12 +307,13 @@ export class RehearsalBankingProvider implements BankingProvider {
         providerId: txn.id,
         status: txn.status === "executed" ? "confirmed" : "failed",
         providerStatus: txn.status,
+        amountCents: txn.amountCents,
       };
     });
   }
 
   async findByCorrelation(input: {
-    kind: "transfer" | "purchase";
+    kind: RecordKind;
     fromAccountRef: string;
     correlation: string;
   }): Promise<ObservedOutcome> {
@@ -213,7 +323,10 @@ export class RehearsalBankingProvider implements BankingProvider {
       .where(
         and(
           eq(rehearsalTransactions.kind, input.kind),
-          eq(rehearsalTransactions.payerAccountId, input.fromAccountRef),
+          or(
+            eq(rehearsalTransactions.payerAccountId, input.fromAccountRef),
+            eq(rehearsalTransactions.payeeAccountId, input.fromAccountRef),
+          ),
           eq(rehearsalTransactions.description, input.correlation),
         ),
       );

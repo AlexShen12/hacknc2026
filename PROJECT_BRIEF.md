@@ -30,7 +30,7 @@ The initial audience is students, roommates and nearby households purchasing rep
 ## What makes the approach distinctive
 
 - **Useful shares:** A cheaper unit price only matters if participants can use the quantity they receive.
-- **Individual affordability:** Each participant sets a contribution limit. Optional mock-account checks consider a user-selected bill buffer; account balance alone does not define affordability.
+- **Individual affordability:** Each participant sets a contribution limit. Mock-account checks subtract unpaid bills due before the pickup date (stored in the shopper's Nessie account) and a personal cushion; account balance alone does not define affordability.
 - **Net savings:** Compare equivalent quantities and include known taxes, fees and fulfillment costs. Clearly distinguish estimates from confirmed amounts.
 - **Feasible groups:** Quantity, budget, offer eligibility, location and pickup constraints all affect whether a group works.
 - **Recovery from disruption:** Recompute the plan when an offer changes, a participant leaves or a contribution fails.

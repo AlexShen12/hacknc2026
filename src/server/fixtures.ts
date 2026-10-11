@@ -29,6 +29,18 @@ const offerSchema = z
     message: "Baselines must cover partial quantities",
   });
 
+const storeSchema = z.object({
+  name: z.string().min(1),
+  address: z.object({
+    streetNumber: z.string(),
+    streetName: z.string(),
+    city: z.string(),
+    state: z.string().length(2),
+    zip: z.string(),
+  }),
+  geocode: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }),
+});
+
 const catalogSchema = z.object({
   fixtureVersion: z.string(),
   notice: z.string(),
@@ -40,6 +52,12 @@ const catalogSchema = z.object({
       durationHours: z.number().int().positive(),
     }),
   ),
+  /** Each retailer's (fictional) store: created as a Nessie merchant with its map location. */
+  stores: z.object({
+    walmart: storeSchema,
+    costco: storeSchema,
+    sams_club: storeSchema,
+  }),
   offers: z.array(offerSchema).min(1),
 });
 
@@ -67,6 +85,15 @@ const personasSchema = z.object({
         seededNeed: needSeed
           .extend({ minutesBeforeSession: z.number().int().positive() })
           .nullable(),
+        bills: z
+          .array(
+            z.object({
+              payee: z.string().min(1),
+              amountCents: cents,
+              dueInDays: z.number().int().nonnegative(),
+            }),
+          )
+          .default([]),
       }),
     )
     .min(2),
@@ -76,7 +103,10 @@ export type Catalog = z.infer<typeof catalogSchema>;
 export type CatalogOffer = Catalog["offers"][number];
 export type PersonaScenario = z.infer<typeof personasSchema>;
 
+let cachedCatalog: Catalog | null = null;
+
 export function loadCatalog(): Catalog {
+  if (cachedCatalog) return cachedCatalog;
   const catalog = catalogSchema.parse(catalogJson);
   const windows = new Set(catalog.pickupWindows.map((window) => window.key));
   for (const offer of catalog.offers) {
@@ -84,6 +114,7 @@ export function loadCatalog(): Catalog {
       if (!windows.has(window)) throw new Error(`Unknown pickup window ${window} in ${offer.key}`);
     }
   }
+  cachedCatalog = catalog;
   return catalog;
 }
 
